@@ -1,33 +1,17 @@
-import { useState, type RefObject } from 'react';
-import {
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-  useWindowDimensions,
-  type TextInputInstance,
-} from 'react-native';
+import type { RefObject } from 'react';
+import { Platform, ScrollView, StyleSheet, type TextInputInstance } from 'react-native';
 import Animated, { Keyframe, useReducedMotion } from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Greeting } from '@/components/chat/Greeting';
-import { SuggestionTile } from '@/components/chat/SuggestionTile';
+import { Wordmark } from '@/components/brand/Wordmark';
+import { SuggestionRow } from '@/components/chat/SuggestionRow';
 import { suggestionsFor, type Suggestion } from '@/components/chat/suggestions';
 import { addDocuments, addPhotosFromLibrary } from '@/chat/attachments';
 import { haptics } from '@/lib/haptics';
 import { useComposerStore } from '@/stores/composer';
 import { ENTRANCES_ON, easing, fadeInOnly, riseIn } from '@/theme/motion';
-import { fontScaleCap, sizes, spacing, typography } from '@/theme/tokens';
+import { sizes, spacing } from '@/theme/tokens';
 
-// What the screen needs besides the hero orb, the greeting's words and the tiles:
-// header 60 + air around the greeting 40 + gap under the orb 20 + gap above the composer 16
-// + composer 120.
-const CHROME_HEIGHT = 256;
-// Below this much usable height the subtitle goes too (the orb is long gone by then):
-// the chrome without the orb's gap (236), the words (102) and two rows of tiles (284).
-const HIDE_SUBTITLE_BELOW = 622;
-
-// When the first message is sent, the greeting and tiles fade and drift up 12pt (200ms).
+// When the first message is sent, the logo and suggestions fade and drift up 12pt (200ms).
 const leave = ENTRANCES_ON
   ? new Keyframe({
       0: { opacity: 1, transform: [{ translateY: 0 }] },
@@ -39,39 +23,28 @@ type EmptyStateProps = {
   /** Space under the floating header. */
   topInset: number;
   inputRef: RefObject<TextInputInstance | null>;
-  /** Show the "Create an image" tile. */
+  /** Show the "Create an image" suggestion. */
   imageGeneration: boolean;
+  /** Voice mode is on: the suggestions step aside. */
+  voice?: boolean;
 };
 
 /**
- * The hero orb takes the room the screen has left: big on tall phones, smaller on short ones,
- * and gone when there is no room for it (for example iPhone SE, or very large text).
- * The words and the tiles are measured, because they wrap onto more lines with bigger text.
+ * A new chat: the logo in the middle of an empty page, and things to try just above the
+ * composer. Nothing else competes with the question the user is about to ask.
  */
-function useHeroOrbSize(wordsHeight: number, tilesHeight: number) {
-  const { height, fontScale } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-  // The whole window, not the space above the keyboard: the orb must not vanish while typing.
-  const usable = height - insets.top - insets.bottom;
-  // The composer's line of text grows with the phone's text size.
-  const composerGrowth =
-    (Math.min(fontScale, fontScaleCap.chrome) - 1) * typography.body.lineHeight;
-  // Nothing is measured on the very first frame. The orb comes in right after it.
-  const measured = wordsHeight > 0 && tilesHeight > 0;
-  const room = Math.floor(usable - CHROME_HEIGHT - composerGrowth - wordsHeight - tilesHeight);
-  return {
-    orbSize: measured && room >= sizes.orbHeroMin ? Math.min(sizes.orbHeroMax, room) : 0,
-    showSubtitle: usable >= HIDE_SUBTITLE_BELOW,
-  };
-}
-
-/** A new chat: the hero orb and greeting, then the bento tiles right above the composer. */
-export function EmptyState({ topInset, inputRef, imageGeneration }: EmptyStateProps) {
+export function EmptyState({
+  topInset,
+  inputRef,
+  imageGeneration,
+  voice = false,
+}: EmptyStateProps) {
   const reduceMotion = useReducedMotion();
-  const [wordsHeight, setWordsHeight] = useState(0);
-  const [tilesHeight, setTilesHeight] = useState(0);
-  const { orbSize, showSubtitle } = useHeroOrbSize(wordsHeight, tilesHeight);
   const setDraft = useComposerStore((state) => state.setDraft);
+  // The suggestions step aside once the user starts writing or adds a file.
+  const idle = useComposerStore(
+    (state) => state.draft.length === 0 && state.attachments.length === 0,
+  );
 
   async function handleSuggestion(suggestion: Suggestion) {
     haptics.selection();
@@ -98,33 +71,18 @@ export function EmptyState({ topInset, inputRef, imageGeneration }: EmptyStatePr
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.greetingArea}>
-          <Greeting orbSize={orbSize} showSubtitle={showSubtitle} onWordsHeight={setWordsHeight} />
-        </View>
-
-        <View
-          style={styles.tiles}
-          onLayout={(event) => setTilesHeight(Math.round(event.nativeEvent.layout.height))}
+        <Animated.View
+          entering={reduceMotion ? fadeInOnly() : riseIn({ distance: 6, delay: 60, duration: 520 })}
         >
-          {suggestionsFor(imageGeneration).map((suggestion, index) => (
-            <SuggestionTile
-              key={suggestion.id}
-              suggestion={suggestion}
-              onPress={handleSuggestion}
-              entering={
-                reduceMotion
-                  ? fadeInOnly()
-                  : riseIn({
-                      distance: 12,
-                      delay: 200 + index * 50,
-                      duration: 340,
-                      fromScale: 0.97,
-                    })
-              }
-            />
-          ))}
-        </View>
+          <Wordmark width={sizes.logo.hero} trademark />
+        </Animated.View>
       </ScrollView>
+
+      <SuggestionRow
+        suggestions={suggestionsFor(imageGeneration)}
+        visible={idle && !voice}
+        onPress={(suggestion) => void handleSuggestion(suggestion)}
+      />
     </Animated.View>
   );
 }
@@ -135,19 +93,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: spacing.gutter,
-    // 16pt between the tiles and the composer.
-    paddingBottom: spacing.lg,
-  },
-  greetingArea: {
-    // The greeting takes the free space above the tiles and sits in its middle.
-    flexGrow: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xl,
-  },
-  tiles: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
+    paddingHorizontal: spacing.gutter,
+    // The logo sits a little above the middle, where the eye lands first.
+    paddingBottom: spacing['4xl'],
   },
 });

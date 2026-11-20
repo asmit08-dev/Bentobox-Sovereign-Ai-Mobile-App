@@ -3,6 +3,11 @@
 import { File, Paths } from 'expo-file-system';
 import type { StateStorage } from 'zustand/middleware';
 
+// Stores saved under the app's old name are read from their old file until they are saved
+// again under the new one. This only helps where the old file is still in this app's folder:
+// the rename also changed the app's slug and bundle id, which give a phone app a new folder.
+const FORMER_NAMES: Record<string, string> = { 'sovrns-chats': 'bentobox-chats' };
+
 function fileFor(name: string) {
   return new File(Paths.document, `${name}.json`);
 }
@@ -42,8 +47,15 @@ export function createFileStorage(): StateStorage {
 
   return {
     getItem: async (name) => {
-      const file = fileFor(name);
-      return file.exists ? file.text() : null;
+      try {
+        const file = fileFor(name);
+        if (file.exists) return await file.text();
+        const former = FORMER_NAMES[name] ? fileFor(FORMER_NAMES[name]) : null;
+        return former?.exists ? await former.text() : null;
+      } catch (error) {
+        console.warn(`Could not read "${name}".`, error);
+        return null;
+      }
     },
     setItem: (name, value) => queue(name, value),
     removeItem: (name) => queue(name, null),

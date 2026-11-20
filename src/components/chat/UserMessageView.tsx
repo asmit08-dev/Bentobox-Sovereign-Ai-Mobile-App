@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { WarningCircleIcon } from 'phosphor-react-native/src/icons/WarningCircle';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { DocumentCard } from '@/components/chat/DocumentCard';
 import { AppText } from '@/components/ui/AppText';
@@ -9,7 +9,8 @@ import { PressableScale } from '@/components/ui/PressableScale';
 import { retrySend } from '@/chat/engine';
 import type { UserMessage } from '@/chat/types';
 import { fileUri } from '@/lib/files';
-import { colors, fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
 
 const PHOTO = 120;
 
@@ -20,8 +21,10 @@ type UserMessageViewProps = {
   isLast: boolean;
 };
 
-/** What the user sent: photos and files above an ink bubble, on the right. */
+/** What the user sent: photos and files above a soft gray bubble, on the right. */
 export function UserMessageView({ chatId, message, isLast }: UserMessageViewProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const photos = message.attachments.filter((file) => file.kind === 'image');
   const documents = message.attachments.filter((file) => file.kind !== 'image');
   const failed = message.status === 'failed';
@@ -90,11 +93,11 @@ export function UserMessageView({ chatId, message, isLast }: UserMessageViewProp
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   column: {
     alignItems: 'flex-end',
     gap: spacing.xs,
-    paddingLeft: '20%',
+    paddingLeft: '16%',
   },
   photos: {
     flexDirection: 'row',
@@ -105,9 +108,9 @@ const styles = StyleSheet.create({
   photo: {
     width: PHOTO,
     height: PHOTO,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderCurve: 'continuous',
-    backgroundColor: colors.codeBg,
+    backgroundColor: colors.surface,
   },
   bubbleRow: {
     flexDirection: 'row',
@@ -118,14 +121,12 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     paddingVertical: 10,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.ink,
-    borderRadius: radius.lg,
-    // The corner toward the composer is tighter: the message came from there.
-    // (No `borderCurve` here: iOS only draws continuous corners when all four are equal.)
-    borderBottomRightRadius: radius.xs,
+    backgroundColor: colors.bubble,
+    borderRadius: 22,
+    borderCurve: 'continuous',
   },
   text: {
     ...typography.body,
-    color: colors.onInk,
+    color: colors.text,
   },
-});
+}));

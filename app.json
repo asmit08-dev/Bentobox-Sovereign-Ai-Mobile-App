@@ -1,22 +1,20 @@
 {
   "expo": {
-    "name": "Bentobox AI",
-    "slug": "bentobox-sovereign-ai",
+    "name": "Sovrns",
+    "slug": "sovrns",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "bentobox",
-    "userInterfaceStyle": "light",
+    "scheme": "sovrns",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
-      "bundleIdentifier": "ai.zolix.bentobox"
+      "bundleIdentifier": "ai.zolix.sovrns"
     },
     "android": {
-      "package": "ai.zolix.bentobox",
+      "package": "ai.zolix.sovrns",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -30,23 +28,27 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#EFEEF3",
+          "backgroundColor": "#FFFFFF",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 96
+          "imageWidth": 160,
+          "dark": {
+            "backgroundColor": "#000000",
+            "image": "./assets/images/splash-icon.png"
+          }
         }
       ],
       "expo-sharing",
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Bentobox to use the microphone so you can talk to it."
+          "microphonePermission": "Allow Sovrns to use the microphone so you can talk to it."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow Bentobox to open your photos so you can ask about them.",
-          "cameraPermission": "Allow Bentobox to use the camera so you can ask about a photo."
+          "photosPermission": "Allow Sovrns to open your photos so you can ask about them.",
+          "cameraPermission": "Allow Sovrns to use the camera so you can ask about a photo."
         }
       ],
       "expo-asset"

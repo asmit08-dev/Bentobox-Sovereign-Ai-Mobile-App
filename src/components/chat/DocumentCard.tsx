@@ -1,7 +1,7 @@
 import { ExportIcon } from 'phosphor-react-native/src/icons/Export';
 import { FilePdfIcon } from 'phosphor-react-native/src/icons/FilePdf';
 import { FileTextIcon } from 'phosphor-react-native/src/icons/FileText';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
 import { PressableScale } from '@/components/ui/PressableScale';
@@ -9,10 +9,13 @@ import type { Attachment } from '@/chat/types';
 import { fileUri } from '@/lib/files';
 import { fileTypeLabel, formatBytes } from '@/lib/format';
 import { shareFile } from '@/lib/share';
-import { colors, radius, sizes, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { radius, sizes, spacing } from '@/theme/tokens';
 
 /** A file in the chat: icon, name, "PDF · 2.4 MB", and Share. Tap to open or share it. */
 export function DocumentCard({ attachment }: { attachment: Attachment }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const Icon = attachment.kind === 'pdf' ? FilePdfIcon : FileTextIcon;
   const details = [fileTypeLabel(attachment.name), formatBytes(attachment.size)]
     .filter(Boolean)
@@ -28,7 +31,7 @@ export function DocumentCard({ attachment }: { attachment: Attachment }) {
       style={styles.card}
     >
       <View style={styles.icon}>
-        <Icon size={22} color={colors.accent} weight="fill" />
+        <Icon size={22} color={colors.text} />
       </View>
       <View style={styles.text}>
         <AppText variant="titleSm" numberOfLines={1} ellipsizeMode="middle">
@@ -38,12 +41,12 @@ export function DocumentCard({ attachment }: { attachment: Attachment }) {
           {details}
         </AppText>
       </View>
-      <ExportIcon size={sizes.icon.action} color={colors.textTertiary} weight="regular" />
+      <ExportIcon size={sizes.icon.action} color={colors.textTertiary} />
     </PressableScale>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   card: {
     width: 280,
     maxWidth: '100%',
@@ -52,7 +55,7 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     borderCurve: 'continuous',
     borderWidth: 1,
     borderColor: colors.hairline,
@@ -62,11 +65,11 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: radius.sm,
     borderCurve: 'continuous',
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
   text: {
     flex: 1,
   },
-});
+}));

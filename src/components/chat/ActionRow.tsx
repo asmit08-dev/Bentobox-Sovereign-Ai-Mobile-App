@@ -6,7 +6,7 @@ import { SpeakerSlashIcon } from 'phosphor-react-native/src/icons/SpeakerSlash';
 import { ThumbsDownIcon } from 'phosphor-react-native/src/icons/ThumbsDown';
 import { ThumbsUpIcon } from 'phosphor-react-native/src/icons/ThumbsUp';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -15,17 +15,17 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 
-import { AppText } from '@/components/ui/AppText';
 import { regenerateAnswer, setFeedback } from '@/chat/engine';
 import type { AssistantMessage } from '@/chat/types';
 import { haptics } from '@/lib/haptics';
 import { copyText } from '@/lib/share';
 import { speak, stopSpeaking, useSpeechStore } from '@/lib/speech';
 import { fadeIn, springs } from '@/theme/motion';
-import { colors, radius, sizes, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { sizes, spacing } from '@/theme/tokens';
 
 const ICON = sizes.icon.action;
-const PRESS_CIRCLE = 36;
+const PRESS_CIRCLE = 34;
 
 type ActionRowProps = {
   chatId: string;
@@ -34,8 +34,10 @@ type ActionRowProps = {
   isLatest: boolean;
 };
 
-/** Under a finished answer: Regenerate (newest only), Copy, 👍, 👎 and Read aloud. */
+/** Under a finished answer, icons only: Copy, 👍, 👎, Read aloud, and Regenerate (newest only). */
 export function ActionRow({ chatId, message, isLatest }: ActionRowProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speaking = useSpeechStore((state) => state.speakingId === message.id);
@@ -68,33 +70,13 @@ export function ActionRow({ chatId, message, isLatest }: ActionRowProps) {
   }
 
   const items: ReactNode[] = [];
-  if (isLatest) {
-    items.push(
-      <Pressable
-        key="regenerate"
-        accessibilityRole="button"
-        accessibilityLabel="Regenerate answer"
-        onPress={() => {
-          haptics.light();
-          stopSpeaking();
-          void regenerateAnswer(chatId, message.id);
-        }}
-        style={({ pressed }) => [styles.regenerate, pressed && styles.pressed]}
-      >
-        <ArrowsClockwiseIcon size={ICON} color={colors.textSecondary} weight="regular" />
-        <AppText variant="label" color={colors.textSecondary}>
-          Regenerate
-        </AppText>
-      </Pressable>,
-    );
-  }
   if (hasText) {
     items.push(
       <ActionButton key="copy" label={copied ? 'Copied' : 'Copy answer'} onPress={copy}>
         {copied ? (
-          <CheckIcon size={ICON} color={colors.success} weight="bold" />
+          <CheckIcon size={ICON} color={colors.text} />
         ) : (
-          <CopyIcon size={ICON} color={colors.textTertiary} weight="regular" />
+          <CopyIcon size={ICON} color={colors.textTertiary} />
         )}
       </ActionButton>,
     );
@@ -109,7 +91,7 @@ export function ActionRow({ chatId, message, isLatest }: ActionRowProps) {
     >
       <ThumbsUpIcon
         size={ICON}
-        color={feedback === 'up' ? colors.ink : colors.textTertiary}
+        color={feedback === 'up' ? colors.text : colors.textTertiary}
         weight={feedback === 'up' ? 'fill' : 'regular'}
       />
     </ActionButton>,
@@ -122,7 +104,7 @@ export function ActionRow({ chatId, message, isLatest }: ActionRowProps) {
     >
       <ThumbsDownIcon
         size={ICON}
-        color={feedback === 'down' ? colors.ink : colors.textTertiary}
+        color={feedback === 'down' ? colors.text : colors.textTertiary}
         weight={feedback === 'down' ? 'fill' : 'regular'}
       />
     </ActionButton>,
@@ -135,10 +117,25 @@ export function ActionRow({ chatId, message, isLatest }: ActionRowProps) {
         onPress={toggleSpeech}
       >
         {speaking ? (
-          <SpeakerSlashIcon size={ICON} color={colors.accent} weight="regular" />
+          <SpeakerSlashIcon size={ICON} color={colors.text} />
         ) : (
-          <SpeakerHighIcon size={ICON} color={colors.textTertiary} weight="regular" />
+          <SpeakerHighIcon size={ICON} color={colors.textTertiary} />
         )}
+      </ActionButton>,
+    );
+  }
+  if (isLatest) {
+    items.push(
+      <ActionButton
+        key="regenerate"
+        label="Regenerate answer"
+        onPress={() => {
+          haptics.light();
+          stopSpeaking();
+          void regenerateAnswer(chatId, message.id);
+        }}
+      >
+        <ArrowsClockwiseIcon size={ICON} color={colors.textTertiary} />
       </ActionButton>,
     );
   }
@@ -165,6 +162,7 @@ type ActionButtonProps = {
 };
 
 function ActionButton({ label, onPress, selected, dimmed, children }: ActionButtonProps) {
+  const styles = useStyles();
   const reduceMotion = useReducedMotion();
   const scale = useSharedValue(1);
   const wasSelected = useRef(selected);
@@ -188,7 +186,7 @@ function ActionButton({ label, onPress, selected, dimmed, children }: ActionButt
       style={[styles.button, dimmed && styles.dimmed]}
     >
       {({ pressed }) => (
-        // A soft gray circle under the finger, smaller than the 44pt touch area.
+        // A soft circle under the finger, smaller than the touch area.
         <View style={[styles.circle, pressed && styles.pressed]}>
           <Animated.View style={popStyle}>{children}</Animated.View>
         </View>
@@ -197,21 +195,14 @@ function ActionButton({ label, onPress, selected, dimmed, children }: ActionButt
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    // The buttons carry their own 44pt touch area, so the row starts a little to the left.
-    marginLeft: -spacing.md,
+    // The buttons carry their own touch area, so the row starts left of the text
+    // and the first icon lines up with the answer's first letter.
+    marginLeft: -(sizes.minTouch - ICON) / 2,
     marginTop: -spacing.xs,
-  },
-  regenerate: {
-    height: sizes.minTouch,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.full,
   },
   button: {
     width: sizes.minTouch,
@@ -227,9 +218,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pressed: {
-    backgroundColor: colors.hairline,
+    backgroundColor: colors.pressed,
   },
   dimmed: {
     opacity: 0.4,
   },
-});
+}));

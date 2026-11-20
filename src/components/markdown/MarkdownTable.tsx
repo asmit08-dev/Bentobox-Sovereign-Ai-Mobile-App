@@ -3,12 +3,21 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { SideScroll } from '@/components/markdown/SideScroll';
-import { colors, fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
 
 type MarkdownTableProps = {
   table: Tokens.Table;
-  renderInline: (tokens: Tokens.TableCell['tokens'], key: string) => ReactNode[];
+  /** `emphasis` says the cell's own text is already bold (the header row is). */
+  renderInline: (
+    tokens: Tokens.TableCell['tokens'],
+    key: string,
+    emphasis?: { bold: boolean; italic: boolean },
+  ) => ReactNode[];
 };
+
+// The header row's own weight (medium) comes from its style.
+const HEADER_EMPHASIS = { bold: false, italic: false };
 
 // Columns can't be measured before drawing, so each column gets a width from its longest cell.
 const CHAR_WIDTH = 7.2;
@@ -25,18 +34,20 @@ function columnWidths(table: Tokens.Table) {
   });
 }
 
-/** A markdown table. It scrolls sideways when it is wider than the bubble. */
+/** A markdown table on a quiet card. It scrolls sideways when it is wider than the screen. */
 export function MarkdownTable({ table, renderInline }: MarkdownTableProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const widths = columnWidths(table);
 
   return (
-    <SideScroll fadeColor={colors.surface}>
+    <SideScroll fadeColor={colors.background}>
       <View style={styles.table}>
         <View style={[styles.row, styles.headerRow]}>
           {table.header.map((cell, column) => (
             <View key={column} style={[styles.cell, { width: widths[column] }]}>
               <Text maxFontSizeMultiplier={fontScaleCap.message} style={styles.headerText}>
-                {renderInline(cell.tokens, `h${column}`)}
+                {renderInline(cell.tokens, `h${column}`, HEADER_EMPHASIS)}
               </Text>
             </View>
           ))}
@@ -57,8 +68,9 @@ export function MarkdownTable({ table, renderInline }: MarkdownTableProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   table: {
+    backgroundColor: colors.background,
     borderRadius: radius.sm,
     borderCurve: 'continuous',
     overflow: 'hidden',
@@ -69,7 +81,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   headerRow: {
-    backgroundColor: colors.surfaceTray,
+    backgroundColor: colors.codeBg,
   },
   bodyRow: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -81,10 +93,10 @@ const styles = StyleSheet.create({
   },
   headerText: {
     ...typography.label,
-    color: colors.ink,
+    color: colors.text,
   },
   cellText: {
-    ...typography.caption,
-    color: colors.ink,
+    ...typography.bodySm,
+    color: colors.text,
   },
-});
+}));

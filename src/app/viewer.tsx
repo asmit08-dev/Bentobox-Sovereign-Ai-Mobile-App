@@ -39,13 +39,13 @@ import { fileUri } from '@/lib/files';
 import { shareCreatedImage, shareFile } from '@/lib/share';
 import { useChatsStore } from '@/stores/chats';
 import { springs } from '@/theme/motion';
-import { colors, spacing } from '@/theme/tokens';
+import { fixed, spacing } from '@/theme/tokens';
 
 const MAX_ZOOM = 4;
 const DOUBLE_TAP_ZOOM = 2.5;
-// A soft ink shade at the bottom, so the caption and dots stay readable over any picture.
+// A soft black shade at the bottom, so the caption and dots stay readable over any picture.
 const SHADE_HEIGHT = 200;
-const SHADE_COLORS = [withAlpha(colors.ink, 0), withAlpha(colors.ink, 0.72)] as const;
+const SHADE_COLORS = [withAlpha(fixed.black, 0), withAlpha(fixed.black, 0.72)] as const;
 
 type Picture =
   | { key: string; kind: 'photo'; attachment: Attachment }
@@ -66,7 +66,7 @@ function usePictures(chatId?: string, messageId?: string): Picture[] {
   return message.images.map((image) => ({ key: image.id, kind: 'created', image }));
 }
 
-/** Full-screen pictures on ink: pinch or double-tap to zoom, swipe down to close. */
+/** Full-screen pictures on black: pinch or double-tap to zoom, swipe down to close. */
 export default function ViewerScreen() {
   const params = useLocalSearchParams<{ chatId?: string; messageId?: string; index?: string }>();
   const pictures = usePictures(params.chatId, params.messageId);
@@ -101,7 +101,7 @@ export default function ViewerScreen() {
   if (pictures.length === 0) {
     return (
       <View style={[styles.screen, styles.empty]}>
-        <IconButton icon={XIcon} label="Close" tone="onInk" onPress={close} />
+        <IconButton icon={XIcon} label="Close" tone="onDark" onPress={close} />
       </View>
     );
   }
@@ -160,11 +160,11 @@ export default function ViewerScreen() {
         style={[styles.topBar, { paddingTop: insets.top + spacing.sm }, chromeStyle]}
         pointerEvents="box-none"
       >
-        <IconButton icon={XIcon} label="Close image" tone="onInk" onPress={close} />
+        <IconButton icon={XIcon} label="Close image" tone="onDark" onPress={close} />
         <IconButton
           icon={ExportIcon}
           label="Share image"
-          tone="onInk"
+          tone="onDark"
           onPress={() => void share()}
         />
       </Animated.View>
@@ -179,7 +179,7 @@ export default function ViewerScreen() {
             // What the assistant made, in its own words. Screen readers get it from the picture.
             <AppText
               variant="bodySm"
-              color={withAlpha(colors.onInk, 0.86)}
+              color={withAlpha(fixed.white, 0.86)}
               numberOfLines={3}
               accessibilityElementsHidden
               importantForAccessibility="no"
@@ -324,10 +324,10 @@ const styles = StyleSheet.create({
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.ink,
+    backgroundColor: fixed.black,
   },
   backdrop: {
-    backgroundColor: colors.ink,
+    backgroundColor: fixed.black,
   },
   page: {
     alignItems: 'center',
@@ -372,9 +372,9 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: withAlpha(colors.onInk, 0.35),
+    backgroundColor: withAlpha(fixed.white, 0.35),
   },
   dotActive: {
-    backgroundColor: colors.onInk,
+    backgroundColor: fixed.white,
   },
 });

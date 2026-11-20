@@ -11,7 +11,8 @@ import { useAppActive } from '@/hooks/useAppActive';
 import { useLoopClock } from '@/hooks/useLoopClock';
 import { withAlpha } from '@/lib/color';
 import { ENTRANCES_ON, fadeIn } from '@/theme/motion';
-import { colors, radius, shadows, sizes, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fixed, radius, sizes, spacing } from '@/theme/tokens';
 
 const SINGLE_MAX_WIDTH = 260;
 const PLACEHOLDER = 240;
@@ -36,6 +37,7 @@ type ImageResultsProps = {
 
 /** One picture as a card; two or three as a fanned stack; four or more fan the first three + "+N". */
 export function ImageResults({ images, maxWidth, onOpen }: ImageResultsProps) {
+  const styles = useStyles();
   if (images.length === 0) return null;
   if (images.length === 1) {
     const image = images[0];
@@ -71,6 +73,7 @@ function flyIn(index: number, offsetX: number, angle: number, reduceMotion: bool
 }
 
 function ImageFan({ images, maxWidth, onOpen }: ImageResultsProps) {
+  const styles = useStyles();
   const reduceMotion = useReducedMotion();
   const shown = images.slice(0, 3);
   const extra = images.length - shown.length;
@@ -118,30 +121,33 @@ function ImageFan({ images, maxWidth, onOpen }: ImageResultsProps) {
       })}
       {extra > 0 ? (
         <View style={[styles.more, { left: fanWidth - 36 }]}>
-          <AppText variant="label" color={colors.onInk}>{`+${extra}`}</AppText>
+          <AppText variant="label" color={fixed.white}>{`+${extra}`}</AppText>
         </View>
       ) : null}
     </View>
   );
 }
 
-const SWIRL_COLORS = [
-  withAlpha(colors.accent, 0.24),
-  withAlpha(colors.orbMagenta, 0.16),
-  withAlpha(colors.orbPale, 0.55),
-  withAlpha(colors.orbBlush, 0.3),
-] as const;
-const SWEEP_COLORS = [
-  withAlpha(colors.surface, 0),
-  withAlpha(colors.surface, 0.55),
-  withAlpha(colors.surface, 0),
-] as const;
+// Soft grays that turn slowly, and a band of light that sweeps across.
+const SWIRL = {
+  light: ['#E4E4E4', '#F5F5F5', '#DADADA', '#F9F9F9'],
+  dark: ['#1E1E1E', '#0E0E0E', '#262626', '#121212'],
+} as const;
 
 /**
- * The square shown while a picture is being made: orb colors swirl slowly and a soft band
- * of light sweeps across. It pauses in the background and stays still with Reduce Motion.
+ * The square shown while a picture is being made: grays swirl slowly and a soft band of light
+ * sweeps across. It pauses in the background and stays still with Reduce Motion.
  */
 export function ImagePlaceholder() {
+  const theme = useTheme();
+  const { colors } = theme;
+  const styles = useStyles();
+  const swirlColors = SWIRL[theme.name];
+  const sweepColors = [
+    withAlpha(fixed.white, 0),
+    withAlpha(fixed.white, theme.dark ? 0.08 : 0.6),
+    withAlpha(fixed.white, 0),
+  ] as const;
   const reduceMotion = useReducedMotion();
   const appActive = useAppActive();
   const time = useLoopClock(appActive && !reduceMotion);
@@ -166,7 +172,7 @@ export function ImagePlaceholder() {
     >
       <Animated.View style={[styles.swirl, swirlStyle]}>
         <LinearGradient
-          colors={SWIRL_COLORS}
+          colors={swirlColors}
           start={{ x: 0.9, y: 0 }}
           end={{ x: 0.1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -175,7 +181,7 @@ export function ImagePlaceholder() {
       {reduceMotion ? null : (
         <Animated.View style={[styles.sweep, sweepStyle]}>
           <LinearGradient
-            colors={SWEEP_COLORS}
+            colors={sweepColors}
             start={{ x: 0, y: 0.5 }}
             end={{ x: 1, y: 0.5 }}
             style={StyleSheet.absoluteFill}
@@ -183,7 +189,7 @@ export function ImagePlaceholder() {
         </Animated.View>
       )}
       <View style={styles.placeholderLabel}>
-        <SparkleIcon size={sizes.icon.tile} color={colors.textSecondary} weight="fill" />
+        <SparkleIcon size={sizes.icon.action} color={colors.textSecondary} weight="fill" />
         <AppText variant="caption" color={colors.textSecondary}>
           Creating image…
         </AppText>
@@ -192,7 +198,7 @@ export function ImagePlaceholder() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   single: {
     alignSelf: 'flex-start',
   },
@@ -210,7 +216,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: radius.md,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     padding: BORDER,
     boxShadow: shadows.photo,
   },
@@ -226,7 +232,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xxs,
     borderRadius: radius.full,
-    backgroundColor: colors.ink,
+    backgroundColor: fixed.black,
   },
   placeholder: {
     alignSelf: 'flex-start',
@@ -236,7 +242,6 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: colors.surface,
-    boxShadow: shadows.rest,
   },
   swirl: {
     position: 'absolute',
@@ -262,4 +267,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.sm,
   },
-});
+}));

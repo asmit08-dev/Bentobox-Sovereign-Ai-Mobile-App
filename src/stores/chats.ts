@@ -120,7 +120,7 @@ export const useChatsStore = create<ChatsState>()(
       },
     }),
     {
-      name: 'bentobox-chats',
+      name: 'sovrns-chats',
       version: 1,
       storage: createJSONStorage(createFileStorage),
       // Only the chats are saved.

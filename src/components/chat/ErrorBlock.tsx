@@ -1,11 +1,12 @@
 import { ArrowsClockwiseIcon } from 'phosphor-react-native/src/icons/ArrowsClockwise';
 import { WarningCircleIcon } from 'phosphor-react-native/src/icons/WarningCircle';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { AppText } from '@/components/ui/AppText';
 import { fadeIn } from '@/theme/motion';
-import { colors, hitSlopFor, radius, shadows, sizes, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { hitSlopFor, radius, sizes, spacing } from '@/theme/tokens';
 
 // The Retry pill: a 16pt label plus 8pt above and below.
 const RETRY_HEIGHT = 32;
@@ -19,6 +20,8 @@ type ErrorBlockProps = {
 
 /** Under an answer that broke: "The answer stopped." with the reason and Retry. */
 export function ErrorBlock({ detail, onRetry }: ErrorBlockProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Animated.View entering={fadeIn()} style={styles.block} accessibilityLiveRegion="polite">
       <WarningCircleIcon size={20} color={colors.danger} weight="fill" />
@@ -40,8 +43,8 @@ export function ErrorBlock({ detail, onRetry }: ErrorBlockProps) {
           onPress={onRetry}
           style={({ pressed }) => [styles.retry, pressed && styles.retryPressed]}
         >
-          <ArrowsClockwiseIcon size={sizes.icon.chip} color={colors.ink} weight="regular" />
-          <AppText variant="label" color={colors.ink}>
+          <ArrowsClockwiseIcon size={sizes.icon.action} color={colors.text} />
+          <AppText variant="label" color={colors.text}>
             Retry
           </AppText>
         </Pressable>
@@ -50,7 +53,7 @@ export function ErrorBlock({ detail, onRetry }: ErrorBlockProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   block: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -74,10 +77,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radius.full,
     borderCurve: 'continuous',
-    backgroundColor: colors.surface,
+    backgroundColor: colors.elevated,
     boxShadow: shadows.rest,
   },
   retryPressed: {
-    backgroundColor: colors.surfaceTray,
+    backgroundColor: colors.fill,
   },
-});
+}));

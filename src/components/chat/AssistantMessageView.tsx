@@ -1,34 +1,33 @@
 import { router } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 
 import { ActionRow } from '@/components/chat/ActionRow';
 import { ErrorBlock } from '@/components/chat/ErrorBlock';
 import { ImagePlaceholder, ImageResults } from '@/components/chat/ImageResults';
-import { Orb, type OrbMode } from '@/components/chat/Orb';
-import { ThinkingBubble } from '@/components/chat/ThinkingBubble';
+import { ThinkingIndicator } from '@/components/chat/ThinkingIndicator';
 import { Markdown } from '@/components/markdown/Markdown';
 import { AppText } from '@/components/ui/AppText';
 import { Pulse } from '@/components/ui/Pulse';
 import { regenerateAnswer } from '@/chat/engine';
 import type { AssistantMessage } from '@/chat/types';
-import { ASSISTANT_NAME } from '@/lib/brand';
 import { useLiveAnswerFor } from '@/stores/live';
-import { colors, radius, shadows, sizes, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { spacing } from '@/theme/tokens';
 
-const DOT = 6;
+const DOT = 8;
 
 type AssistantMessageViewProps = {
   chatId: string;
   message: AssistantMessage;
-  /** The newest answer: its orb moves, and it offers Regenerate and Retry. */
+  /** The newest answer: it offers Regenerate and Retry. */
   isLatest: boolean;
   /** Width the answer can use (the screen minus the gutters). */
   contentWidth: number;
 };
 
 /**
- * One assistant turn: the orb and the assistant's name on top, then the answer in its
- * white compartment, pictures, notes and actions. The answer gets the full width.
+ * One assistant turn: the answer as plain text on the page (no bubble, no avatar),
+ * then pictures, notes and the actions. The answer gets the full width.
  */
 export function AssistantMessageView({
   chatId,
@@ -36,14 +35,13 @@ export function AssistantMessageView({
   isLatest,
   contentWidth,
 }: AssistantMessageViewProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const live = useLiveAnswerFor(message.id);
   const streaming = live !== null;
   const text = live ? live.text : message.text;
   const images = live ? live.images : message.images;
   const phase = live?.phase;
-
-  let orbMode: OrbMode = 'idle';
-  if (live) orbMode = phase === 'writing' ? 'streaming' : 'thinking';
 
   const waiting = live !== null && !text && images.length === 0 && phase !== 'creating_image';
   const finished = !streaming && message.status !== 'error';
@@ -58,15 +56,10 @@ export function AssistantMessageView({
 
   return (
     <View style={styles.turn}>
-      <View style={styles.speaker}>
-        <Orb size={sizes.orbAvatar} animated={isLatest} mode={orbMode} />
-        <AppText variant="label">{ASSISTANT_NAME}</AppText>
-      </View>
-
-      {waiting && live ? <ThinkingBubble startedAt={live.startedAt} /> : null}
+      {waiting && live ? <ThinkingIndicator startedAt={live.startedAt} /> : null}
 
       {text ? (
-        <View style={styles.bubble}>
+        <View style={styles.answer}>
           <Markdown text={text} trailing={streaming ? <StreamingDot /> : undefined} />
         </View>
       ) : null}
@@ -77,12 +70,12 @@ export function AssistantMessageView({
       {phase === 'creating_image' ? <ImagePlaceholder /> : null}
 
       {message.status === 'stopped' && !streaming ? (
-        <AppText variant="caption" color={colors.textSecondary} style={styles.note}>
+        <AppText variant="caption" color={colors.textSecondary}>
           Stopped
         </AppText>
       ) : null}
       {message.note && message.status === 'done' ? (
-        <AppText variant="caption" color={colors.textSecondary} style={styles.note}>
+        <AppText variant="caption" color={colors.textSecondary}>
           {message.note}
         </AppText>
       ) : null}
@@ -100,8 +93,9 @@ export function AssistantMessageView({
   );
 }
 
-/** The violet dot that pulses at the end of the text while an answer streams. */
+/** The dot that pulses at the end of the text while an answer streams. */
 function StreamingDot() {
+  const styles = useStyles();
   return (
     <View style={styles.dotBox}>
       <Pulse period={900} minOpacity={0.25}>
@@ -111,32 +105,13 @@ function StreamingDot() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   turn: {
     alignItems: 'flex-start',
-    gap: spacing.xs,
-  },
-  speaker: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: spacing.sm,
-    // A little more air between the name and the answer than between the answer's own parts.
-    marginBottom: spacing.xs,
   },
-  bubble: {
-    // Hugs short answers; long ones use the full width.
-    maxWidth: '100%',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    // The corner under the orb is tighter: the answer hangs from the speaker.
-    // (No `borderCurve` here: iOS only draws continuous corners when all four are equal.)
-    borderTopLeftRadius: radius.xs,
-    boxShadow: shadows.rest,
-  },
-  note: {
-    paddingHorizontal: spacing.xs,
+  answer: {
+    alignSelf: 'stretch',
   },
   dotBox: {
     width: DOT + spacing.xs,
@@ -147,6 +122,6 @@ const styles = StyleSheet.create({
     width: DOT,
     height: DOT,
     borderRadius: DOT / 2,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.text,
   },
-});
+}));

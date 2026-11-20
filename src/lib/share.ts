@@ -34,7 +34,7 @@ export async function shareFile(uri: string, mimeType?: string) {
 /** Shares a picture the assistant made. */
 export async function shareCreatedImage(image: CreatedImage) {
   if (image.svg) {
-    const uri = writeTempFile(`bentobox-${image.id.slice(-8)}.svg`, image.svg);
+    const uri = writeTempFile(`sovrns-${image.id.slice(-8)}.svg`, image.svg);
     await shareFile(uri, 'image/svg+xml');
   } else if (image.url) {
     await shareText(image.url);

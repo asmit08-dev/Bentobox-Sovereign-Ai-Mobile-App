@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 
 import { AppText } from '@/components/ui/AppText';
-import { colors, fontScaleCap, radius, shadows, spacing, typography } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
 
 type RenameDialogProps = {
   /** The current title, filled into the field. */
@@ -24,6 +25,9 @@ type RenameDialogProps = {
  * Mount it only while renaming, so the field always starts from the current title.
  */
 export function RenameDialog({ title, onCancel, onSave }: RenameDialogProps) {
+  const theme = useTheme();
+  const { colors } = theme;
+  const styles = useStyles();
   const [value, setValue] = useState(title);
   const trimmed = value.trim();
 
@@ -49,8 +53,9 @@ export function RenameDialog({ title, onCancel, onSave }: RenameDialogProps) {
             placeholder="Chat name"
             placeholderTextColor={colors.textTertiary}
             maxFontSizeMultiplier={fontScaleCap.chrome}
-            cursorColor={colors.accent}
-            selectionColor={Platform.OS === 'ios' ? colors.accent : colors.accentSoft}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
+            cursorColor={colors.text}
+            selectionColor={Platform.OS === 'ios' ? colors.text : colors.selection}
             accessibilityLabel="Chat name"
             style={styles.input}
           />
@@ -58,18 +63,22 @@ export function RenameDialog({ title, onCancel, onSave }: RenameDialogProps) {
             <Pressable
               accessibilityRole="button"
               onPress={onCancel}
-              style={[styles.button, styles.secondary]}
+              style={({ pressed }) => [styles.button, styles.secondary, pressed && styles.dim]}
             >
-              <AppText variant="label">Cancel</AppText>
+              <AppText variant="button">Cancel</AppText>
             </Pressable>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ disabled: !trimmed }}
               disabled={!trimmed}
               onPress={() => onSave(trimmed)}
-              style={[styles.button, trimmed ? styles.primary : styles.primaryDisabled]}
+              style={({ pressed }) => [
+                styles.button,
+                trimmed ? styles.primary : styles.primaryDisabled,
+                pressed && styles.dim,
+              ]}
             >
-              <AppText variant="label" color={colors.onInk}>
+              <AppText variant="button" color={trimmed ? colors.onPrimary : colors.textTertiary}>
                 Save
               </AppText>
             </Pressable>
@@ -80,7 +89,7 @@ export function RenameDialog({ title, onCancel, onSave }: RenameDialogProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   backdrop: {
     flex: 1,
     justifyContent: 'center',
@@ -90,19 +99,22 @@ const styles = StyleSheet.create({
   card: {
     gap: spacing.lg,
     padding: spacing.xl,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.elevated,
     borderRadius: radius.xl,
     borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairline,
     boxShadow: shadows.lifted,
   },
   input: {
     ...typography.body,
-    color: colors.ink,
+    color: colors.text,
     minHeight: 48,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.surfaceTray,
-    borderRadius: radius.full,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderRadius: radius.sm,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.hairline,
     // No focus ring in the web preview (see Composer).
     outlineStyle: 'solid',
@@ -122,12 +134,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   secondary: {
-    backgroundColor: colors.surfaceTray,
+    backgroundColor: colors.fill,
   },
   primary: {
-    backgroundColor: colors.ink,
+    backgroundColor: colors.primary,
   },
   primaryDisabled: {
-    backgroundColor: colors.inkDisabled,
+    backgroundColor: colors.fillStrong,
   },
-});
+  dim: {
+    opacity: 0.8,
+  },
+}));

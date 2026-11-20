@@ -1,10 +1,11 @@
 {
-  "name": "bentobox-sovereign-ai-mobile-app",
+  "name": "sovrns-mobile-app",
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.10.0",
-    "@expo-google-fonts/plus-jakarta-sans": "^0.4.2",
+    "@expo-google-fonts/geist-mono": "^0.4.3",
+    "@expo-google-fonts/sora": "^0.4.2",
     "@expo/ui": "~58.0.29",
     "@shopify/flash-list": "2.3.2",
     "@shopify/react-native-skia": "2.14.0",

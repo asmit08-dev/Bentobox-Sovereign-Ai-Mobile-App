@@ -4,7 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
 import type { CreatedImage } from '@/api/contract';
-import { colors } from '@/theme/tokens';
+import { useTheme } from '@/theme/theme';
 
 type CreatedImageViewProps = {
   image: CreatedImage;
@@ -21,12 +21,13 @@ export const CreatedImageView = memo(function CreatedImageView({
   width,
   height,
 }: CreatedImageViewProps) {
+  const { colors } = useTheme();
   return (
     <View
       accessible
       accessibilityRole="image"
       accessibilityLabel={image.alt}
-      style={[styles.frame, { width, height }]}
+      style={[styles.frame, { width, height, backgroundColor: colors.surface }]}
     >
       {image.svg ? (
         <SvgXml xml={image.svg} width={width} height={height} />
@@ -45,6 +46,5 @@ export function aspectOf(image: { width?: number; height?: number }) {
 const styles = StyleSheet.create({
   frame: {
     overflow: 'hidden',
-    backgroundColor: colors.codeBg,
   },
 });

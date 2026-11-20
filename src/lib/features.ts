@@ -1,4 +1,4 @@
-// Defaults for features that depend on the backend. See "Open decisions" in DESIGN.md.
+// Defaults for features that depend on the backend.
 // The backend has the final say through GET /api/capabilities (see useCapabilities).
 // These values are only used until that answer arrives.
 export const features = {

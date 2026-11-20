@@ -1,4 +1,4 @@
-// Draws an assistant answer written in Markdown, with the DESIGN.md text styles.
+// Draws an assistant answer written in Markdown, with the app's text styles.
 // `marked` only splits the text into pieces (tokens); every piece is drawn here
 // with React Native views, so it works in Expo Go and while text is still streaming.
 import * as WebBrowser from 'expo-web-browser';
@@ -8,7 +8,10 @@ import { Linking, StyleSheet, Text, View, type TextStyle } from 'react-native';
 
 import { CodeBlock } from '@/components/markdown/CodeBlock';
 import { MarkdownTable } from '@/components/markdown/MarkdownTable';
-import { colors, fontScaleCap, fonts, spacing, typography } from '@/theme/tokens';
+import { makeStyles } from '@/theme/theme';
+import { fontScaleCap, fonts, spacing, typography } from '@/theme/tokens';
+
+type Styles = ReturnType<typeof useStyles>;
 
 type MarkdownProps = {
   text: string;
@@ -33,35 +36,50 @@ function openLink(href: string) {
   }
 }
 
-function renderInline(tokens: Token[] | undefined, key: string): ReactNode[] {
+/** Whether the text around a piece is already bold or italic (a heading is bold, for example). */
+type Emphasis = { bold: boolean; italic: boolean };
+
+const PLAIN: Emphasis = { bold: false, italic: false };
+
+// Sora keeps bold and italic in separate font files, so emphasis switches the file.
+// `fontWeight` and `fontStyle` would be ignored on Android and faked in the web preview.
+function faceFor({ bold, italic }: Emphasis) {
+  if (bold) return italic ? fonts.semiboldItalic : fonts.semibold;
+  return italic ? fonts.italic : fonts.regular;
+}
+
+function renderInline(
+  styles: Styles,
+  tokens: Token[] | undefined,
+  key: string,
+  emphasis: Emphasis = PLAIN,
+): ReactNode[] {
   if (!tokens) return [];
   return tokens.map((token, index) => {
     const id = `${key}.${index}`;
     switch (token.type) {
       case 'text':
         return token.tokens ? (
-          <Fragment key={id}>{renderInline(token.tokens, id)}</Fragment>
+          <Fragment key={id}>{renderInline(styles, token.tokens, id, emphasis)}</Fragment>
         ) : (
           <Fragment key={id}>{token.text}</Fragment>
         );
       case 'escape':
         return <Fragment key={id}>{token.text}</Fragment>;
       case 'strong':
+      case 'em': {
+        const inner =
+          token.type === 'strong' ? { ...emphasis, bold: true } : { ...emphasis, italic: true };
         return (
-          <Text key={id} style={styles.strong}>
-            {renderInline(token.tokens, id)}
+          <Text key={id} style={{ fontFamily: faceFor(inner) }}>
+            {renderInline(styles, token.tokens, id, inner)}
           </Text>
         );
-      case 'em':
-        return (
-          <Text key={id} style={styles.em}>
-            {renderInline(token.tokens, id)}
-          </Text>
-        );
+      }
       case 'del':
         return (
           <Text key={id} style={styles.del}>
-            {renderInline(token.tokens, id)}
+            {renderInline(styles, token.tokens, id, emphasis)}
           </Text>
         );
       case 'codespan':
@@ -80,7 +98,7 @@ function renderInline(tokens: Token[] | undefined, key: string): ReactNode[] {
             onPress={() => openLink(token.href)}
             style={styles.link}
           >
-            {renderInline(token.tokens, id)}
+            {renderInline(styles, token.tokens, id, emphasis)}
           </Text>
         );
       case 'image':
@@ -110,13 +128,21 @@ function textOf(token: Token) {
   return typeof text === 'string' ? text : '';
 }
 
+// Headings stay in the reading face: a step bigger than the body, in the medium weight, so
+// an answer reads as calm text with a clear outline rather than a page of bold.
 const HEADING_STYLES: Record<number, TextStyle> = {
-  1: { fontFamily: fonts.bold, fontSize: 20, lineHeight: 26 },
-  2: { fontFamily: fonts.bold, fontSize: 18, lineHeight: 24 },
-  3: { fontFamily: fonts.bold, fontSize: 16, lineHeight: 22 },
+  1: { fontFamily: fonts.medium, fontSize: 20, lineHeight: 27, letterSpacing: -0.45 },
+  2: { fontFamily: fonts.medium, fontSize: 17.5, lineHeight: 25, letterSpacing: -0.3 },
+  3: {
+    fontFamily: fonts.medium,
+    fontSize: typography.body.fontSize,
+    lineHeight: typography.body.lineHeight,
+    letterSpacing: -0.15,
+  },
 };
 
 function Paragraph({ children, style }: { children: ReactNode; style?: TextStyle }) {
+  const styles = useStyles();
   return (
     <Text selectable maxFontSizeMultiplier={fontScaleCap.message} style={[styles.body, style]}>
       {children}
@@ -125,16 +151,17 @@ function Paragraph({ children, style }: { children: ReactNode; style?: TextStyle
 }
 
 type MarkdownListProps = {
+  styles: Styles;
   list: Tokens.List;
   keyPrefix: string;
   /** The streaming dot: it follows the last word of the last item. */
   trailing?: ReactNode;
 };
 
-function MarkdownList({ list, keyPrefix, trailing }: MarkdownListProps) {
+function MarkdownList({ styles, list, keyPrefix, trailing }: MarkdownListProps) {
   // While streaming, a new bullet arrives before its words do. Its dot then stands alone.
   const renderItem = (item: Tokens.ListItem, key: string, last: boolean) => {
-    const blocks = renderBlocks(item.tokens, key, last ? trailing : undefined);
+    const blocks = renderBlocks(styles, item.tokens, key, last ? trailing : undefined);
     if (blocks.length > 0 || !last) return blocks;
     // One line tall, so the dot sits level with the bullet.
     return <View style={styles.loneTrailing}>{trailing}</View>;
@@ -162,7 +189,12 @@ function MarkdownList({ list, keyPrefix, trailing }: MarkdownListProps) {
   );
 }
 
-function renderBlocks(tokens: Token[], key: string, trailing?: ReactNode): ReactNode[] {
+function renderBlocks(
+  styles: Styles,
+  tokens: Token[],
+  key: string,
+  trailing?: ReactNode,
+): ReactNode[] {
   const visible = tokens.filter((token) => token.type !== 'space' && token.type !== 'def');
   return visible.map((token, index) => {
     const id = `${key}.${index}`;
@@ -172,8 +204,9 @@ function renderBlocks(tokens: Token[], key: string, trailing?: ReactNode): React
       case 'heading': {
         const level = Math.min(3, Math.max(1, token.depth));
         return (
+          // The heading's words take its medium weight from the paragraph style.
           <Paragraph key={id} style={{ ...HEADING_STYLES[level], ...styles.heading }}>
-            {renderInline(token.tokens, id)}
+            {renderInline(styles, token.tokens, id)}
             {end}
           </Paragraph>
         );
@@ -181,14 +214,14 @@ function renderBlocks(tokens: Token[], key: string, trailing?: ReactNode): React
       case 'paragraph':
         return (
           <Paragraph key={id}>
-            {renderInline(token.tokens, id)}
+            {renderInline(styles, token.tokens, id)}
             {end}
           </Paragraph>
         );
       case 'text':
         return (
           <Paragraph key={id}>
-            {token.tokens ? renderInline(token.tokens, id) : token.text}
+            {token.tokens ? renderInline(styles, token.tokens, id) : token.text}
             {end}
           </Paragraph>
         );
@@ -200,17 +233,30 @@ function renderBlocks(tokens: Token[], key: string, trailing?: ReactNode): React
           </Fragment>
         );
       case 'list':
-        return <MarkdownList key={id} list={token as Tokens.List} keyPrefix={id} trailing={end} />;
+        return (
+          <MarkdownList
+            key={id}
+            styles={styles}
+            list={token as Tokens.List}
+            keyPrefix={id}
+            trailing={end}
+          />
+        );
       case 'blockquote':
         return (
           <View key={id} style={styles.quote}>
-            {renderBlocks(token.tokens ?? [], id, end)}
+            {renderBlocks(styles, token.tokens ?? [], id, end)}
           </View>
         );
       case 'table':
         return (
           <Fragment key={id}>
-            <MarkdownTable table={token as Tokens.Table} renderInline={renderInline} />
+            <MarkdownTable
+              table={token as Tokens.Table}
+              renderInline={(cells, cellKey, emphasis) =>
+                renderInline(styles, cells, cellKey, emphasis)
+              }
+            />
             {end}
           </Fragment>
         );
@@ -229,44 +275,40 @@ function renderBlocks(tokens: Token[], key: string, trailing?: ReactNode): React
 
 /** Markdown → native views. Re-parses only when the text changes. */
 export const Markdown = memo(function Markdown({ text, trailing }: MarkdownProps) {
+  const styles = useStyles();
   const tokens = useMemo(() => lexer(closeOpenFence(text)), [text]);
-  const blocks = renderBlocks(tokens, 'md', trailing);
+  const blocks = renderBlocks(styles, tokens, 'md', trailing);
   return <View style={styles.root}>{blocks.length > 0 ? blocks : trailing}</View>;
 });
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   root: {
     // 8pt between paragraphs.
     gap: spacing.sm,
   },
   body: {
     ...typography.body,
-    color: colors.ink,
+    color: colors.text,
     includeFontPadding: false,
   },
   heading: {
-    color: colors.ink,
-    // 12pt above a heading (8 from the gap + 4 here), 4pt below.
-    marginTop: spacing.xs,
+    color: colors.text,
+    // 16pt above a heading (8 from the gap + 8 here), 4pt below.
+    marginTop: spacing.sm,
     marginBottom: -spacing.xs,
-  },
-  strong: {
-    fontFamily: fonts.bold,
-  },
-  em: {
-    fontStyle: 'italic',
   },
   del: {
     textDecorationLine: 'line-through',
   },
   codespan: {
     fontFamily: fonts.mono,
-    fontSize: 14,
-    backgroundColor: colors.codeBg,
+    fontSize: typography.body.fontSize - 2,
+    backgroundColor: colors.fill,
   },
   link: {
-    color: colors.accent,
+    color: colors.text,
     textDecorationLine: 'underline',
+    textDecorationColor: colors.textTertiary,
   },
   list: {
     // 6pt between items.
@@ -278,7 +320,7 @@ const styles = StyleSheet.create({
   },
   marker: {
     ...typography.body,
-    color: colors.textTertiary,
+    color: colors.textSecondary,
     includeFontPadding: false,
   },
   number: {
@@ -295,13 +337,13 @@ const styles = StyleSheet.create({
   quote: {
     gap: spacing.sm,
     paddingLeft: spacing.md,
-    // A thin neutral rule marks the quote. Violet stays rare (the One Violet Rule).
+    // A thin neutral rule marks the quote; the accent is kept for things you can act on.
     borderLeftWidth: 2,
-    borderLeftColor: colors.inkDisabled,
+    borderLeftColor: colors.fillStrong,
   },
   rule: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.hairline,
     marginVertical: spacing.xs,
   },
-});
+}));

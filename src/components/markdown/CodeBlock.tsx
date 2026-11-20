@@ -7,15 +7,8 @@ import { SideScroll } from '@/components/markdown/SideScroll';
 import { AppText } from '@/components/ui/AppText';
 import { haptics } from '@/lib/haptics';
 import { copyText } from '@/lib/share';
-import {
-  colors,
-  fontScaleCap,
-  hitSlopFor,
-  radius,
-  sizes,
-  spacing,
-  typography,
-} from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fontScaleCap, hitSlopFor, radius, sizes, spacing, typography } from '@/theme/tokens';
 
 type CodeBlockProps = {
   code: string;
@@ -24,6 +17,8 @@ type CodeBlockProps = {
 
 /** A code block: language label and Copy on top. Code never wraps; it scrolls sideways. */
 export function CodeBlock({ code, language }: CodeBlockProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -46,7 +41,7 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
     <View style={styles.block}>
       <View style={styles.header}>
         <AppText variant="micro" color={colors.textTertiary} style={styles.language}>
-          {language ? language.toUpperCase() : 'CODE'}
+          {language ? language.toLowerCase() : 'code'}
         </AppText>
         <Pressable
           accessibilityRole="button"
@@ -55,9 +50,9 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
           onPress={handleCopy}
         >
           {copied ? (
-            <CheckIcon size={sizes.icon.action} color={colors.success} weight="bold" />
+            <CheckIcon size={sizes.icon.action - 2} color={colors.text} />
           ) : (
-            <CopyIcon size={sizes.icon.action} color={colors.textTertiary} weight="regular" />
+            <CopyIcon size={sizes.icon.action - 2} color={colors.textTertiary} />
           )}
         </Pressable>
       </View>
@@ -70,11 +65,13 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   block: {
     backgroundColor: colors.codeBg,
-    borderRadius: radius.sm,
+    borderRadius: radius.md,
     borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairline,
     padding: spacing.md,
     gap: spacing.sm,
   },
@@ -88,6 +85,6 @@ const styles = StyleSheet.create({
   },
   code: {
     ...typography.mono,
-    color: colors.ink,
+    color: colors.text,
   },
-});
+}));

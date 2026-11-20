@@ -1,4 +1,4 @@
-// The haptic map from the "Motion" section of DESIGN.md. Use only these.
+// The app's haptic map. Use only these.
 import * as Haptics from 'expo-haptics';
 
 function play(run: () => Promise<void>) {

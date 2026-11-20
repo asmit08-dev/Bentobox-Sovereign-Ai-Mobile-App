@@ -1,24 +1,41 @@
-import type { Icon } from 'phosphor-react-native';
-import { StyleSheet } from 'react-native';
+import type { ComponentType } from 'react';
+import { Pressable } from 'react-native';
 
-import { PressableScale } from '@/components/ui/PressableScale';
 import { withAlpha } from '@/lib/color';
 import { haptics } from '@/lib/haptics';
-import { colors, hitSlopFor, shadows, sizes } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { fixed, hitSlopFor, sizes } from '@/theme/tokens';
 
 type IconButtonProps = {
-  icon: Icon;
+  /** A Phosphor icon or one from components/ui/icons. */
+  icon: ComponentType<{ size?: number; color?: string }>;
   /** What a screen reader says, for example "Open chat history". */
   label: string;
   onPress: () => void;
-  /** "onInk" for dark screens like the image viewer: smoky glass with a white icon. */
-  tone?: 'glass' | 'onInk';
+  /**
+   * plain: just the icon; a soft circle shows under the finger (header, drawer).
+   * filled: a quiet gray circle (controls that sit alone, like in voice mode).
+   * onDark: a smoky circle with a white icon, for the black picture viewer.
+   */
+  tone?: 'plain' | 'filled' | 'onDark';
+  /** Icon color. Defaults to the theme's text color (white on `onDark`). */
+  color?: string;
 };
 
-/** A round glass button for the header: 44pt, white glass, a hairline border and a soft seat. */
-export function IconButton({ icon: IconGlyph, label, onPress, tone = 'glass' }: IconButtonProps) {
+/** A round 44pt icon button. */
+export function IconButton({
+  icon: Glyph,
+  label,
+  onPress,
+  tone = 'plain',
+  color,
+}: IconButtonProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  const iconColor = color ?? (tone === 'onDark' ? fixed.white : colors.text);
+
   return (
-    <PressableScale
+    <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       hitSlop={hitSlopFor(sizes.iconButton)}
@@ -26,33 +43,38 @@ export function IconButton({ icon: IconGlyph, label, onPress, tone = 'glass' }: 
         haptics.light();
         onPress();
       }}
-      style={[styles.button, tone === 'onInk' && styles.onInk]}
+      style={({ pressed }) => [styles.button, styles[tone], pressed && styles[PRESSED[tone]]]}
     >
-      <IconGlyph
-        size={sizes.icon.header}
-        color={tone === 'onInk' ? colors.onInk : colors.ink}
-        weight="regular"
-      />
-    </PressableScale>
+      <Glyph size={sizes.icon.header} color={iconColor} />
+    </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+// The style each tone takes under the finger.
+const PRESSED = { plain: 'pressed', filled: 'filledPressed', onDark: 'onDarkPressed' } as const;
+
+const useStyles = makeStyles(({ colors }) => ({
   button: {
     width: sizes.iconButton,
     height: sizes.iconButton,
     borderRadius: sizes.iconButton / 2,
-    backgroundColor: colors.glassFill,
-    borderWidth: 1,
-    borderColor: colors.hairline,
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: shadows.glass,
   },
-  onInk: {
-    backgroundColor: withAlpha(colors.onInk, 0.14),
-    borderColor: withAlpha(colors.onInk, 0.16),
-    // On ink there is nothing for a shadow to fall on.
-    boxShadow: 'none',
+  plain: {},
+  filled: {
+    backgroundColor: colors.surface,
   },
-});
+  onDark: {
+    backgroundColor: withAlpha(fixed.white, 0.14),
+  },
+  pressed: {
+    backgroundColor: colors.pressed,
+  },
+  filledPressed: {
+    backgroundColor: colors.fill,
+  },
+  onDarkPressed: {
+    backgroundColor: withAlpha(fixed.white, 0.24),
+  },
+}));

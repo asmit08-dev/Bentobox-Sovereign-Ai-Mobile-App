@@ -15,7 +15,7 @@ export type Suggestion = {
   prefill?: string;
 };
 
-// Example content from DESIGN.md. The final words come from the product team.
+// Starter suggestions for a new chat. The final words come from the product team.
 const ALL_SUGGESTIONS: Suggestion[] = [
   {
     id: 'summarize',

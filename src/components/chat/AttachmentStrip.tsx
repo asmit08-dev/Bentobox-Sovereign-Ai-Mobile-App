@@ -11,11 +11,12 @@ import { withAlpha } from '@/lib/color';
 import { fileUri } from '@/lib/files';
 import { fileTypeLabel, formatBytes } from '@/lib/format';
 import { popIn, popOut, smoothLayout } from '@/theme/motion';
-import { colors, radius, spacing } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { radius, spacing } from '@/theme/tokens';
 import type { DraftAttachment } from '@/stores/composer';
 
 const THUMB = 56;
-const REMOVE = 20;
+const REMOVE = 22;
 
 type AttachmentStripProps = {
   items: DraftAttachment[];
@@ -24,6 +25,8 @@ type AttachmentStripProps = {
 
 /** The files waiting in the composer: photo thumbnails and document chips, each with ×. */
 export function AttachmentStrip({ items, onRemove }: AttachmentStripProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <ScrollView
       horizontal
@@ -52,7 +55,7 @@ export function AttachmentStrip({ items, onRemove }: AttachmentStripProps) {
             onPress={() => onRemove(item.id)}
             style={styles.remove}
           >
-            <XIcon size={11} color={colors.onInk} weight="bold" />
+            <XIcon size={11} color={colors.onPrimary} weight="bold" />
           </Pressable>
         </Animated.View>
       ))}
@@ -61,13 +64,15 @@ export function AttachmentStrip({ items, onRemove }: AttachmentStripProps) {
 }
 
 function PhotoThumb({ item }: { item: DraftAttachment }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const uri = item.attachment ? fileUri(item.attachment.path) : item.previewUri;
   return (
     <View style={styles.thumb} accessibilityLabel={`Photo ${item.name}`}>
       {uri ? <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
       {item.status === 'preparing' ? (
         <View style={styles.veil}>
-          <ActivityIndicator size="small" color={colors.accent} />
+          <ActivityIndicator size="small" color={colors.text} />
         </View>
       ) : null}
     </View>
@@ -75,15 +80,17 @@ function PhotoThumb({ item }: { item: DraftAttachment }) {
 }
 
 function DocumentChip({ item }: { item: DraftAttachment }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const Icon = item.kind === 'pdf' ? FilePdfIcon : FileTextIcon;
   const size = item.attachment ? formatBytes(item.attachment.size) : '';
   return (
     <View style={styles.chip} accessibilityLabel={`File ${item.name}`}>
       <View style={styles.chipIcon}>
         {item.status === 'preparing' ? (
-          <ActivityIndicator size="small" color={colors.accent} />
+          <ActivityIndicator size="small" color={colors.text} />
         ) : (
-          <Icon size={20} color={colors.accent} weight="fill" />
+          <Icon size={20} color={colors.text} />
         )}
       </View>
       <View style={styles.chipText}>
@@ -98,7 +105,7 @@ function DocumentChip({ item }: { item: DraftAttachment }) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors }) => ({
   row: {
     gap: spacing.sm,
     paddingTop: spacing.sm,
@@ -115,7 +122,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderCurve: 'continuous',
     overflow: 'hidden',
-    backgroundColor: colors.codeBg,
+    backgroundColor: colors.fill,
   },
   veil: {
     position: 'absolute',
@@ -123,8 +130,8 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    // A 30% white veil while the photo is prepared.
-    backgroundColor: withAlpha(colors.surface, 0.3),
+    // A veil while the photo is prepared.
+    backgroundColor: withAlpha(colors.background, 0.4),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -135,7 +142,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.sm,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     borderRadius: radius.md,
     borderCurve: 'continuous',
     borderWidth: 1,
@@ -146,7 +153,7 @@ const styles = StyleSheet.create({
     height: 36,
     borderRadius: radius.xs,
     borderCurve: 'continuous',
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.fill,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -160,7 +167,10 @@ const styles = StyleSheet.create({
     width: REMOVE,
     height: REMOVE,
     borderRadius: REMOVE / 2,
-    backgroundColor: colors.ink,
+    backgroundColor: colors.primary,
+    // A ring in the composer's color keeps the × crisp against any photo.
+    borderWidth: 2,
+    borderColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -171,4 +181,4 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: colors.surface,
   },
-});
+}));

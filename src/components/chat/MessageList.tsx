@@ -18,7 +18,8 @@ import type { Chat, Message } from '@/chat/types';
 import { withAlpha } from '@/lib/color';
 import { useLiveStore } from '@/stores/live';
 import { fadeInOnly, riseIn } from '@/theme/motion';
-import { colors, spacing } from '@/theme/tokens';
+import { useTheme } from '@/theme/theme';
+import { spacing } from '@/theme/tokens';
 
 // Closer than this to the end counts as "at the bottom".
 const BOTTOM_SLACK = 48;
@@ -32,6 +33,8 @@ type MessageListProps = {
   topInset: number;
   /** Tells the header when content scrolls under it (to show its blur). */
   onScrolledChange: (scrolled: boolean) => void;
+  /** Messages fade out at the bottom edge. Off in voice mode, where the light rises there. */
+  fadeEdge?: boolean;
 };
 
 /**
@@ -69,7 +72,13 @@ function latestAssistantId(messages: Message[]) {
  * The conversation. New messages appear at the bottom. While an answer streams,
  * the list follows it, but only if the user is already at the bottom.
  */
-export function MessageList({ chat, topInset, onScrolledChange }: MessageListProps) {
+export function MessageList({
+  chat,
+  topInset,
+  onScrolledChange,
+  fadeEdge = true,
+}: MessageListProps) {
+  const { colors } = useTheme();
   const listRef = useRef<FlashListRef<Message>>(null);
   const { width } = useWindowDimensions();
   const streamingHere = useLiveStore((state) => state.answer?.chatId === chat.id);
@@ -165,11 +174,13 @@ export function MessageList({ chat, topInset, onScrolledChange }: MessageListPro
       />
 
       {/* Messages fade under the composer instead of being cut. */}
-      <LinearGradient
-        pointerEvents="none"
-        colors={[withAlpha(colors.canvas, 0), colors.canvas]}
-        style={styles.fade}
-      />
+      {fadeEdge ? (
+        <LinearGradient
+          pointerEvents="none"
+          colors={[withAlpha(colors.background, 0), colors.background]}
+          style={styles.fade}
+        />
+      ) : null}
 
       {showJump ? (
         <View style={styles.jump} pointerEvents="box-none">

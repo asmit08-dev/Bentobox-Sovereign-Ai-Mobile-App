@@ -1,4 +1,4 @@
-// Motion tokens from the "Motion" section of DESIGN.md, plus the entrance presets built from them.
+// Motion tokens, plus the entrance presets built from them.
 import { Platform } from 'react-native';
 import {
   Easing,
@@ -31,6 +31,8 @@ export const springs = {
   snappy: { damping: 18, stiffness: 320, mass: 0.7 },
   smooth: { damping: 22, stiffness: 200, mass: 1 },
   bouncy: { damping: 12, stiffness: 220, mass: 0.8 },
+  // A bottom sheet rising: quick, and it stops at the top instead of bouncing past it.
+  sheet: { damping: 110, stiffness: 900, mass: 4, overshootClamping: true },
 } as const;
 
 type RiseInOptions = {

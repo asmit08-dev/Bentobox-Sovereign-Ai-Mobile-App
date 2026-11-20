@@ -1,21 +1,24 @@
 import { ArrowDownIcon } from 'phosphor-react-native/src/icons/ArrowDown';
-import { StyleSheet, View } from 'react-native';
+import { View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
 import { PressableScale } from '@/components/ui/PressableScale';
 import { fadeIn, fadeOut } from '@/theme/motion';
-import { colors, hitSlopFor, shadows, sizes } from '@/theme/tokens';
+import { makeStyles, useTheme } from '@/theme/theme';
+import { hitSlopFor, sizes } from '@/theme/tokens';
 
-const SIZE = 40;
+const SIZE = 38;
 
 type ScrollToBottomButtonProps = {
   onPress: () => void;
-  /** A small violet dot while an answer streams below. */
+  /** A small dot while an answer streams below. */
   streaming: boolean;
 };
 
 /** The round "jump to the latest message" button. */
 export function ScrollToBottomButton({ onPress, streaming }: ScrollToBottomButtonProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <Animated.View entering={fadeIn()} exiting={fadeOut()}>
       <PressableScale
@@ -25,22 +28,21 @@ export function ScrollToBottomButton({ onPress, streaming }: ScrollToBottomButto
         onPress={onPress}
         style={styles.button}
       >
-        <ArrowDownIcon size={sizes.icon.chip + 2} color={colors.ink} weight="regular" />
+        <ArrowDownIcon size={sizes.icon.action + 2} color={colors.text} />
         {streaming ? <View style={styles.dot} /> : null}
       </PressableScale>
     </Animated.View>
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles(({ colors, shadows }) => ({
   button: {
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    // It floats over messages, so it is closer to solid white than the header's glass.
-    backgroundColor: colors.surface,
+    backgroundColor: colors.elevated,
     borderWidth: 1,
     borderColor: colors.hairline,
     boxShadow: shadows.float,
@@ -52,6 +54,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.text,
   },
-});
+}));

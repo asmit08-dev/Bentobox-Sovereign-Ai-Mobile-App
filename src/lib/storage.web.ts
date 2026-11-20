@@ -1,11 +1,15 @@
 // WEB PREVIEW ONLY: keeps app state in the browser's localStorage. Phones use storage.ts.
 import type { StateStorage } from 'zustand/middleware';
 
+// Stores saved under the app's old name are read from there until they are saved again.
+const FORMER_NAMES: Record<string, string> = { 'sovrns-chats': 'bentobox-chats' };
+
 export function createFileStorage(): StateStorage {
   return {
     getItem: (name) => {
       try {
-        return localStorage.getItem(name);
+        const former = FORMER_NAMES[name];
+        return localStorage.getItem(name) ?? (former ? localStorage.getItem(former) : null);
       } catch {
         return null;
       }
