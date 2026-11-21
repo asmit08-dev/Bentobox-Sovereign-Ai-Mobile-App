@@ -47,7 +47,7 @@ export function RenameDialog({ title, onCancel, onSave }: RenameDialogProps) {
             onChangeText={setValue}
             autoFocus
             selectTextOnFocus
-            maxLength={80}
+            maxLength={120}
             returnKeyType="done"
             onSubmitEditing={() => trimmed && onSave(trimmed)}
             placeholder="Chat name"

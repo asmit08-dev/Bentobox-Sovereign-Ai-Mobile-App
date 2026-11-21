@@ -7,6 +7,7 @@ import { SuggestionRow } from '@/components/chat/SuggestionRow';
 import { suggestionsFor, type Suggestion } from '@/components/chat/suggestions';
 import { addDocuments, addPhotosFromLibrary } from '@/chat/attachments';
 import { haptics } from '@/lib/haptics';
+import { useFeatures } from '@/stores/auth';
 import { useComposerStore } from '@/stores/composer';
 import { ENTRANCES_ON, easing, fadeInOnly, riseIn } from '@/theme/motion';
 import { sizes, spacing } from '@/theme/tokens';
@@ -23,8 +24,6 @@ type EmptyStateProps = {
   /** Space under the floating header. */
   topInset: number;
   inputRef: RefObject<TextInputInstance | null>;
-  /** Show the "Create an image" suggestion. */
-  imageGeneration: boolean;
   /** Voice mode is on: the suggestions step aside. */
   voice?: boolean;
 };
@@ -33,14 +32,10 @@ type EmptyStateProps = {
  * A new chat: the logo in the middle of an empty page, and things to try just above the
  * composer. Nothing else competes with the question the user is about to ask.
  */
-export function EmptyState({
-  topInset,
-  inputRef,
-  imageGeneration,
-  voice = false,
-}: EmptyStateProps) {
+export function EmptyState({ topInset, inputRef, voice = false }: EmptyStateProps) {
   const reduceMotion = useReducedMotion();
   const setDraft = useComposerStore((state) => state.setDraft);
+  const picturesAllowed = useFeatures()?.images !== false;
   // The suggestions step aside once the user starts writing or adds a file.
   const idle = useComposerStore(
     (state) => state.draft.length === 0 && state.attachments.length === 0,
@@ -79,7 +74,7 @@ export function EmptyState({
       </ScrollView>
 
       <SuggestionRow
-        suggestions={suggestionsFor(imageGeneration)}
+        suggestions={suggestionsFor({ pictures: picturesAllowed })}
         visible={idle && !voice}
         onPress={(suggestion) => void handleSuggestion(suggestion)}
       />

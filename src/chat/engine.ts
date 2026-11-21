@@ -1,35 +1,36 @@
-// The chat engine: send a message, stream the answer, stop, retry, regenerate.
+// The chat engine: ask a question (text, pictures or voice), get the answer, retry.
 // Screens call these functions. The engine updates the stores; the screens re-render.
+//
+// One POST /ask per question (the answer comes back whole, not word by word). Every question has
+// an Idempotency-Key, and its exact body is saved until the answer arrives: if the answer is cut
+// off on the way back, the same body goes out again with the same key and the server returns the
+// answer it already made, charged once (spec 5.4).
 import { AccessibilityInfo } from 'react-native';
 
-import { NetworkError } from '@/api/client';
-import type { ChatFinish } from '@/api/contract';
-import { fetchTitle, streamChat } from '@/api/endpoints';
-import { buildChatRequest } from '@/chat/request';
-import type { AssistantMessage, Attachment, Message, UserMessage } from '@/chat/types';
+import { friendlyError, isReplayable, isSessionError } from '@/api/errors';
+import { ApiError } from '@/api/http';
+import * as api from '@/api/sovrns';
+import type { AskAudio, VoiceReply } from '@/api/types';
+import { buildAskBody } from '@/chat/askBody';
+import { prepareImagesForSend } from '@/chat/images';
+import { canStartOver } from '@/chat/keyRule';
+import { deletePendingBody, loadPendingBody, savePendingBody } from '@/chat/pendingBodies';
+import { askWithReplay } from '@/chat/replay';
+import { refreshChats } from '@/chat/sync';
+import type { AssistantMessage, Attachment, UserMessage } from '@/chat/types';
 import { haptics } from '@/lib/haptics';
 import { newId } from '@/lib/id';
+import { authed, useAuthStore } from '@/stores/auth';
 import { useChatsStore } from '@/stores/chats';
 import { useLiveStore } from '@/stores/live';
 
-// New words are shown in small groups, at most every 50ms, so long answers stay smooth.
-const FLUSH_MS = 50;
+const DEFAULT_PAGES_MAX = 50;
+const DEFAULT_IMAGE_BYTES = 4_194_304;
+const INCOMPLETE = 'This answer may be incomplete.';
+const VOICE_GONE = "This voice message can't be sent again. Tap the mic and ask again.";
 
-const REFUSED_TEXT = "Sorry, I can't help with that request.";
-
-/** The Stop button aborts this. Only one answer streams at a time. */
-let currentAbort: AbortController | null = null;
-
-function emptyAnswer(): AssistantMessage {
-  return {
-    id: newId(),
-    role: 'assistant',
-    text: '',
-    images: [],
-    status: 'streaming',
-    createdAt: Date.now(),
-  };
-}
+type AskResult = { answer?: AssistantMessage; voiceReply: VoiceReply | null };
+type VoiceInput = { audio: AskAudio; replyAsVoice: boolean };
 
 /** The first title of a chat, from its first message: "Plan a trip to Goa…". */
 export function titleFrom(text: string, attachments: Attachment[]) {
@@ -40,22 +41,199 @@ export function titleFrom(text: string, attachments: Attachment[]) {
   return first.kind === 'image' ? 'Photo' : first.name;
 }
 
-function findMessage(chatId: string, messageId: string): Message | undefined {
-  return useChatsStore.getState().chats[chatId]?.messages.find((m) => m.id === messageId);
+function waitingAnswer(): AssistantMessage {
+  return { id: newId(), role: 'assistant', text: '', status: 'waiting', createdAt: Date.now() };
+}
+
+function findUser(chatId: string, userId: string) {
+  const message = useChatsStore
+    .getState()
+    .chats[chatId]?.messages.find((entry) => entry.id === userId);
+  return message?.role === 'user' ? message : undefined;
+}
+
+function droppedNote(sent: number) {
+  return `Only the first ${sent} pages fit in one question. Ask again with the rest.`;
 }
 
 /**
- * Sends a message in the chat on screen, or starts a new chat.
- * Resolves with the finished answer (undefined if it could not be sent).
+ * The body for a question, saved under its key. A saved body is reused byte for byte; it also
+ * means this key was sent before (`reused`).
+ */
+async function bodyFor(chatId: string, user: UserMessage, key: string, voice?: VoiceInput) {
+  const saved = await loadPendingBody(key);
+  if (saved) return { json: saved, note: undefined, reused: true };
+  // A voice question's recording is gone once sent; only its saved body can go again.
+  if (user.voice && !voice) throw new Error(VOICE_GONE);
+
+  const features = useAuthStore.getState().features;
+  const { images, dropped } = await prepareImagesForSend(user.attachments, {
+    maxImages: features?.document_pages_max ?? DEFAULT_PAGES_MAX,
+    maxImageBytes: features?.image_bytes_max ?? DEFAULT_IMAGE_BYTES,
+    otherChars: user.text.length,
+  });
+  // Not even one picture fits in a request: say so instead of asking without them.
+  if (images.length === 0 && dropped > 0) {
+    throw new ApiError({
+      status: 413,
+      code: 'request_too_large',
+      message: 'The pictures are too large to send.',
+    });
+  }
+  const json = JSON.stringify(
+    buildAskBody({
+      question: user.text,
+      chatId: useChatsStore.getState().chats[chatId]?.serverId,
+      images,
+      audio: voice?.audio,
+      replyAsVoice: voice?.replyAsVoice,
+    }),
+  );
+  await savePendingBody(key, json);
+  return { json, note: dropped > 0 ? droppedNote(images.length) : undefined, reused: false };
+}
+
+/** Sends the question `userId` and puts the answer in `answerId` (which shows the waiting dots). */
+async function runAsk(
+  chatId: string,
+  userId: string,
+  answerId: string,
+  voice?: VoiceInput,
+): Promise<AskResult> {
+  const user = findUser(chatId, userId);
+  if (!user) return { voiceReply: null };
+  const key = user.idempotencyKey ?? newId();
+  const chats = useChatsStore.getState();
+  if (!user.idempotencyKey) {
+    chats.updateMessage(chatId, userId, (m) => ({ ...m, idempotencyKey: key }) as UserMessage);
+  }
+
+  useLiveStore.getState().start(chatId, answerId);
+  // Whether this key ever went out before this answer: then the first send may still be
+  // answered, and the key must stay (chat/keyRule.ts).
+  let reused = false;
+  let sends = 0;
+  try {
+    const body = await bodyFor(chatId, user, key, voice);
+    reused = body.reused;
+    const { json, note } = body;
+    const response = await askWithReplay(() => {
+      sends += 1;
+      return authed((token) =>
+        // A try that runs past api.ASK_TIMEOUT_MS is re-sent with the same key.
+        api.ask(token, json, { idempotencyKey: key }),
+      );
+    });
+    await deletePendingBody(key);
+
+    const store = useChatsStore.getState();
+    store.linkServer(chatId, response.chat_id);
+    store.updateMessage(chatId, userId, (message) => {
+      const question = message as UserMessage;
+      const heard = question.voice && response.transcript ? response.transcript : question.text;
+      return { ...question, text: heard, status: 'sent', requestId: response.request_id };
+    });
+    // The server never sends photos back: they are kept by request id for later syncs.
+    store.rememberAttachments(chatId, response.request_id, user.attachments);
+    const incomplete =
+      response.finish_reason != null && response.finish_reason !== 'completed' ? INCOMPLETE : '';
+    const answer: AssistantMessage = {
+      id: answerId,
+      role: 'assistant',
+      text: response.answer ?? '',
+      status: 'done',
+      note: [note, incomplete].filter(Boolean).join(' ') || undefined,
+      createdAt: Date.now(),
+      requestId: response.request_id,
+    };
+    store.updateMessage(chatId, answerId, (message) => ({
+      ...answer,
+      createdAt: message.createdAt,
+    }));
+    // A question sent again (after a restart) may already be shown from the server.
+    store.mergeAnswered(chatId, userId, answerId, response.request_id);
+    AccessibilityInfo.announceForAccessibility('Answer ready');
+    // Today's usage and the server's title for the chat.
+    useAuthStore
+      .getState()
+      .refreshMe()
+      .catch(() => {});
+    refreshChats().catch(() => {});
+    return { answer, voiceReply: response.voice_reply };
+  } catch (error) {
+    return failAsk(chatId, userId, answerId, key, error, !reused && sends <= 1);
+  } finally {
+    useLiveStore.getState().clear();
+  }
+}
+
+async function failAsk(
+  chatId: string,
+  userId: string,
+  answerId: string,
+  key: string,
+  error: unknown,
+  firstSend: boolean,
+): Promise<AskResult> {
+  const store = useChatsStore.getState();
+  haptics.error();
+
+  if (isReplayable(error)) {
+    // The answer may still come back. Keep the key and the saved body: Retry gets it for free.
+    store.removeMessage(chatId, answerId);
+    store.updateMessage(chatId, userId, (m) => ({ ...m, status: 'failed' }) as UserMessage);
+    return { voiceReply: null };
+  }
+
+  // The server refused the very first send of this key: nothing was answered or charged, so
+  // the next try is a new question with a new key. In every other case the key and the saved
+  // body stay, so a Retry gets the first send's answer and is charged once.
+  if (canStartOver(error, firstSend)) {
+    await deletePendingBody(key);
+    store.updateMessage(
+      chatId,
+      userId,
+      (m) => ({ ...m, idempotencyKey: undefined }) as UserMessage,
+    );
+  }
+  if (isSessionError(error)) {
+    store.removeMessage(chatId, answerId);
+    store.updateMessage(chatId, userId, (m) => ({ ...m, status: 'failed' }) as UserMessage);
+    return { voiceReply: null };
+  }
+  if (error instanceof ApiError && error.code === 'chat_not_active') {
+    store.updateChat(chatId, { canContinue: false });
+  }
+  const note = error instanceof ApiError ? friendlyError(error) : messageOf(error);
+  const failed: AssistantMessage = {
+    id: answerId,
+    role: 'assistant',
+    text: '',
+    status: 'error',
+    note,
+    createdAt: Date.now(),
+  };
+  store.updateMessage(chatId, answerId, (message) => ({ ...failed, createdAt: message.createdAt }));
+  return { answer: failed, voiceReply: null };
+}
+
+function messageOf(error: unknown) {
+  return error instanceof Error && error.message === VOICE_GONE ? VOICE_GONE : friendlyError(error);
+}
+
+function chatForNewQuestion(title: string) {
+  const store = useChatsStore.getState();
+  const active = store.activeChatId;
+  return active && store.chats[active] ? active : store.createChat(title);
+}
+
+/**
+ * Asks a question in the chat on screen, or starts a new chat.
+ * Resolves with the answer (undefined if it could not be sent).
  */
 export async function sendMessage(text: string, attachments: Attachment[]) {
   if (useLiveStore.getState().answer) return undefined;
-
-  const store = useChatsStore.getState();
-  const active = store.activeChatId;
-  const chatId =
-    active && store.chats[active] ? active : store.createChat(titleFrom(text, attachments));
-
+  const chatId = chatForNewQuestion(titleFrom(text, attachments));
   const user: UserMessage = {
     id: newId(),
     role: 'user',
@@ -63,211 +241,60 @@ export async function sendMessage(text: string, attachments: Attachment[]) {
     attachments,
     createdAt: Date.now(),
     status: 'sent',
+    idempotencyKey: newId(),
   };
-  const answer = emptyAnswer();
+  const answer = waitingAnswer();
   useChatsStore.getState().appendMessages(chatId, [user, answer]);
-  return runAnswer(chatId, answer.id);
+  const result = await runAsk(chatId, user.id, answer.id);
+  return result.answer;
 }
 
-/** Stops the answer that is streaming. The words so far are kept. */
-export function stopAnswer() {
-  if (!currentAbort) return;
-  haptics.rigid();
-  currentAbort.abort();
+/**
+ * Asks by voice. The server writes down what was said (it becomes the question's text) and,
+ * with `replyAsVoice`, sends a spoken answer too.
+ */
+export async function sendVoice(audio: AskAudio, options: { replyAsVoice: boolean }) {
+  if (useLiveStore.getState().answer) return { voiceReply: null } as AskResult;
+  const chatId = chatForNewQuestion('Voice message');
+  const user: UserMessage = {
+    id: newId(),
+    role: 'user',
+    text: '',
+    attachments: [],
+    createdAt: Date.now(),
+    status: 'sent',
+    voice: true,
+    idempotencyKey: newId(),
+  };
+  const answer = waitingAnswer();
+  useChatsStore.getState().appendMessages(chatId, [user, answer]);
+  return runAsk(chatId, user.id, answer.id, { audio, replyAsVoice: options.replyAsVoice });
 }
 
-/** Asks again for an answer (Regenerate, or Retry after an error). It replaces the old one. */
-export async function regenerateAnswer(chatId: string, answerId: string) {
+/** Sends a "Not sent" question again, with the same key: an answer already made comes back free. */
+export async function retrySend(chatId: string, userMessageId: string) {
   if (useLiveStore.getState().answer) return undefined;
-  const message = findMessage(chatId, answerId);
-  if (message?.role !== 'assistant') return undefined;
-  useChatsStore.getState().updateMessage(chatId, answerId, () => ({
-    ...emptyAnswer(),
+  if (!findUser(chatId, userMessageId)) return undefined;
+  const store = useChatsStore.getState();
+  store.updateMessage(chatId, userMessageId, (m) => ({ ...m, status: 'sent' }) as UserMessage);
+  const answer = waitingAnswer();
+  store.appendMessages(chatId, [answer]);
+  const result = await runAsk(chatId, userMessageId, answer.id);
+  return result.answer;
+}
+
+/** Asks again for an answer that failed. It replaces the failed one. */
+export async function retryAnswer(chatId: string, answerId: string) {
+  if (useLiveStore.getState().answer) return undefined;
+  const messages = useChatsStore.getState().chats[chatId]?.messages ?? [];
+  const index = messages.findIndex((message) => message.id === answerId);
+  const question = messages[index - 1];
+  if (index < 1 || question?.role !== 'user') return undefined;
+  useChatsStore.getState().updateMessage(chatId, answerId, (message) => ({
+    ...waitingAnswer(),
     id: answerId,
     createdAt: message.createdAt,
   }));
-  return runAnswer(chatId, answerId);
-}
-
-/** Sends a "Not sent" message again. */
-export async function retrySend(chatId: string, userMessageId: string) {
-  if (useLiveStore.getState().answer) return undefined;
-  const message = findMessage(chatId, userMessageId);
-  if (message?.role !== 'user') return undefined;
-  const store = useChatsStore.getState();
-  store.updateMessage(chatId, userMessageId, (m) => ({ ...m, status: 'sent' }) as UserMessage);
-  const answer = emptyAnswer();
-  store.appendMessages(chatId, [answer]);
-  return runAnswer(chatId, answer.id);
-}
-
-/** Saves 👍 / 👎 on an answer. Tapping the same one again clears it. */
-export function setFeedback(chatId: string, answerId: string, feedback: 'up' | 'down') {
-  useChatsStore
-    .getState()
-    .updateMessage(chatId, answerId, (message) =>
-      message.role === 'assistant'
-        ? { ...message, feedback: message.feedback === feedback ? undefined : feedback }
-        : message,
-    );
-  // TODO(api): send feedback to the real backend when it has an endpoint for it.
-}
-
-type Outcome =
-  | { kind: 'done'; finish: ChatFinish }
-  | { kind: 'stopped' }
-  | { kind: 'error'; message: string }
-  | { kind: 'not_sent' };
-
-async function runAnswer(chatId: string, answerId: string) {
-  const chat = useChatsStore.getState().chats[chatId];
-  const index = chat?.messages.findIndex((message) => message.id === answerId) ?? -1;
-  if (!chat || index === -1) return undefined;
-  const history = chat.messages.slice(0, index);
-  const asker = history[history.length - 1];
-
-  const abort = new AbortController();
-  currentAbort = abort;
-  useLiveStore.getState().start(chatId, answerId);
-
-  // Text arrives in many tiny pieces. Collect them and show them every FLUSH_MS.
-  let pending = '';
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const flush = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    if (pending) useLiveStore.getState().appendText(pending);
-    pending = '';
-  };
-
-  let outcome: Outcome;
-  let started = false;
-  let finish: ChatFinish | undefined;
-  let serverError: string | undefined;
-
-  try {
-    const body = await buildChatRequest(history);
-    await streamChat(body, {
-      signal: abort.signal,
-      onEvent: (event) => {
-        started = true;
-        switch (event.type) {
-          case 'text':
-            pending += event.delta;
-            timer ??= setTimeout(flush, FLUSH_MS);
-            break;
-          case 'status':
-            flush();
-            if (event.status === 'creating_image') {
-              useLiveStore.getState().setPhase('creating_image');
-            }
-            break;
-          case 'image':
-            flush();
-            useLiveStore.getState().addImage(event.image);
-            haptics.soft();
-            break;
-          case 'done':
-            finish = event.finish;
-            break;
-          case 'error':
-            serverError = event.message;
-            break;
-        }
-      },
-    });
-    flush();
-    if (serverError) outcome = { kind: 'error', message: serverError };
-    else if (finish) outcome = { kind: 'done', finish };
-    else outcome = { kind: 'error', message: 'The connection closed before the answer finished.' };
-  } catch (error) {
-    flush();
-    if (abort.signal.aborted) outcome = { kind: 'stopped' };
-    else if (error instanceof NetworkError && !started) outcome = { kind: 'not_sent' };
-    else {
-      outcome = {
-        kind: 'error',
-        message: error instanceof Error ? error.message : 'Something went wrong.',
-      };
-    }
-  }
-
-  // Copy the live answer into the saved chat and clear the live store.
-  const live = useLiveStore.getState().answer;
-  const text = live?.messageId === answerId ? live.text : '';
-  const images = live?.messageId === answerId ? live.images : [];
-  useLiveStore.getState().clear();
-  if (currentAbort === abort) currentAbort = null;
-
-  const store = useChatsStore.getState();
-  if (outcome.kind === 'not_sent') {
-    store.removeMessage(chatId, answerId);
-    if (asker?.role === 'user') {
-      store.updateMessage(chatId, asker.id, (m) => ({ ...m, status: 'failed' }) as UserMessage);
-    }
-    haptics.error();
-    return undefined;
-  }
-
-  let final: AssistantMessage = { ...emptyAnswer(), id: answerId, text, images };
-  const empty = !text.trim() && images.length === 0;
-  if (outcome.kind === 'done' && outcome.finish !== 'refused' && empty) {
-    // Nothing to show (for example a picture that failed to draw). Offer Retry, not a blank turn.
-    final = { ...final, status: 'error', note: 'The answer came back empty. Try again.' };
-    haptics.error();
-  } else if (outcome.kind === 'done') {
-    if (outcome.finish === 'refused') {
-      // A declined answer can stop halfway. Don't keep the half.
-      final = { ...final, text: REFUSED_TEXT, images: [], status: 'done' };
-    } else if (outcome.finish === 'length') {
-      final = {
-        ...final,
-        status: 'done',
-        note: 'The answer was cut short because it got too long.',
-      };
-    } else {
-      final = { ...final, status: 'done' };
-    }
-  } else if (outcome.kind === 'stopped') {
-    final = { ...final, status: 'stopped' };
-  } else {
-    final = { ...final, status: 'error', note: outcome.message };
-    haptics.error();
-  }
-
-  store.updateMessage(chatId, answerId, (message) => ({
-    ...final,
-    createdAt: message.createdAt,
-    feedback: undefined,
-  }));
-
-  if (final.status === 'done') {
-    AccessibilityInfo.announceForAccessibility('Answer ready');
-    void nameChat(chatId);
-  }
-  return final;
-}
-
-/** After the first answer, asks the backend for a better chat title. Fails quietly. */
-async function nameChat(chatId: string) {
-  const chat = useChatsStore.getState().chats[chatId];
-  const [first, second] = chat?.messages ?? [];
-  if (!chat || chat.messages.length !== 2) return;
-  if (first?.role !== 'user' || second?.role !== 'assistant') return;
-  // A picture-only answer is described by its pictures.
-  const answer = second.text || second.images.map((image) => `[Image: ${image.alt}]`).join('\n');
-  if (!answer) return;
-  // Only replace the automatic title, never one the user typed.
-  if (chat.title !== titleFrom(first.text, first.attachments)) return;
-  try {
-    const { title } = await fetchTitle({
-      userText: first.text || first.attachments.map((file) => file.name).join(', '),
-      assistantText: answer,
-    });
-    const now = useChatsStore.getState().chats[chatId];
-    if (title && now && now.title === chat.title)
-      useChatsStore.getState().renameChat(chatId, title);
-  } catch {
-    // Keep the automatic title.
-  }
+  const result = await runAsk(chatId, question.id, answerId);
+  return result.answer;
 }

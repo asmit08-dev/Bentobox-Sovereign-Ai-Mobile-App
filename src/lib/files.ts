@@ -26,6 +26,24 @@ export async function keepFile(sourceUri: string, fileName: string) {
   return { path: `${FOLDER}/${fileName}`, size: target.size };
 }
 
+/**
+ * Saves base64 data as a file: in the attachments folder (kept with the chat; store `path`,
+ * which is relative to the document folder) or in the cache (temporary; `path` is the URI).
+ */
+export async function writeBase64File(
+  fileName: string,
+  base64: string,
+  folder: 'attachments' | 'cache',
+) {
+  const directory = folder === 'attachments' ? attachmentsFolder() : new Directory(Paths.cache);
+  const file = new File(directory, fileName);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(base64, { encoding: 'base64' });
+  const path = folder === 'attachments' ? `${FOLDER}/${fileName}` : file.uri;
+  return { path, uri: file.uri, size: file.size };
+}
+
 /** A URI that <Image> and the share sheet can open. */
 export function fileUri(path: string) {
   return fileAt(path).uri;
@@ -52,6 +70,16 @@ export function deleteFile(path: string) {
   try {
     const file = fileAt(path);
     if (file.exists) file.delete();
+  } catch {
+    // Already gone. Nothing to do.
+  }
+}
+
+/** Deletes every saved attachment (Sign out, another account, or the old test-AI chats). */
+export function deleteAllAttachments() {
+  try {
+    const folder = new Directory(Paths.document, FOLDER);
+    if (folder.exists) folder.delete();
   } catch {
     // Already gone. Nothing to do.
   }

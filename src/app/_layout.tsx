@@ -11,12 +11,16 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { setupApi } from '@/api/config';
+import { PdfRendererHost } from '@/lib/pdf/PdfRendererHost';
 import { useSkiaReady } from '@/lib/skia-ready';
+import { useAuthStore } from '@/stores/auth';
 import { useApplyTheme, useSettingsStore, useTheme } from '@/theme/theme';
 
-// Keep the splash screen up until the fonts and the saved Appearance choice are ready,
-// so a dark-mode user never sees a light frame.
+// Keep the splash screen up until the fonts, the saved Appearance choice and the saved login
+// are ready, so a dark-mode user never sees a light frame and nobody sees sign-in by mistake.
 SplashScreen.preventAutoHideAsync();
+setupApi();
 
 // The keys are the names that theme/tokens.ts `fonts` uses.
 const FONTS = {
@@ -31,11 +35,18 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(FONTS);
   const skiaReady = useSkiaReady();
   const settingsReady = useSettingsStore((state) => state.hydrated);
+  const authStatus = useAuthStore((state) => state.status);
   const theme = useTheme();
   // If the fonts fail to load, still open the app (text falls back to the system font).
-  const ready = (fontsLoaded || fontError != null) && skiaReady && settingsReady;
+  const ready =
+    (fontsLoaded || fontError != null) && skiaReady && settingsReady && authStatus !== 'loading';
+  const signedIn = authStatus === 'signedIn';
 
   useApplyTheme();
+
+  useEffect(() => {
+    void useAuthStore.getState().hydrate();
+  }, []);
 
   useEffect(() => {
     if (ready) SplashScreen.hide();
@@ -53,17 +64,26 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: theme.colors.background },
           }}
         >
-          <Stack.Screen name="index" />
-          {/* Full-screen pictures, always on black. */}
-          <Stack.Screen
-            name="viewer"
-            options={{
-              presentation: 'transparentModal',
-              animation: 'fade',
-              contentStyle: { backgroundColor: 'transparent' },
-            }}
-          />
+          {/* Signed in: the chat, and full-screen pictures (always on black). */}
+          <Stack.Protected guard={signedIn}>
+            <Stack.Screen name="index" />
+            <Stack.Screen
+              name="viewer"
+              options={{
+                presentation: 'transparentModal',
+                animation: 'fade',
+                contentStyle: { backgroundColor: 'transparent' },
+              }}
+            />
+          </Stack.Protected>
+          {/* Signed out: the phone number, then the code from the SMS. */}
+          <Stack.Protected guard={!signedIn}>
+            <Stack.Screen name="sign-in" />
+            <Stack.Screen name="verify" />
+          </Stack.Protected>
         </Stack>
+        {/* Draws PDF pages for questions (a hidden WebView on phones, nothing on web). */}
+        {signedIn ? <PdfRendererHost /> : null}
       </QueryClientProvider>
     </GestureHandlerRootView>
   );

@@ -12,18 +12,18 @@ import Animated, {
   type SharedValue,
 } from 'react-native-reanimated';
 
-import { transcribe } from '@/api/endpoints';
 import { AppText } from '@/components/ui/AppText';
 import { PressableScale } from '@/components/ui/PressableScale';
 import { Pulse } from '@/components/ui/Pulse';
 import type { GlowMode } from '@/components/voice/HorizonGlow';
-import { sendMessage, stopAnswer } from '@/chat/engine';
+import { sendVoice } from '@/chat/engine';
 import { RECORDING_MIME_TYPE, useVoiceRecorder } from '@/hooks/useVoiceRecorder';
 import { withAlpha } from '@/lib/color';
 import { deleteUri, readUriBase64 } from '@/lib/files';
 import { haptics } from '@/lib/haptics';
 import { speak, stopSpeaking } from '@/lib/speech';
-import { useLiveStore } from '@/stores/live';
+import { playVoiceReply } from '@/lib/voiceReply';
+import { useFeatures } from '@/stores/auth';
 import { makeStyles, useTheme } from '@/theme/theme';
 import { hitSlopFor, spacing } from '@/theme/tokens';
 
@@ -36,10 +36,11 @@ const MAX_RECORDING_MS = 120_000;
 const LISTEN_DELAY_MS = 300;
 
 /**
- * idle: waiting for the user. listening: recording. transcribing: turning speech into text.
- * answering: the answer streams into the chat. speaking: the answer is read aloud.
+ * idle: waiting for the user. listening: recording.
+ * answering: the server writes down what was said and answers, in one call.
+ * speaking: the answer is read aloud.
  */
-type Phase = 'idle' | 'listening' | 'transcribing' | 'answering' | 'speaking';
+type Phase = 'idle' | 'listening' | 'answering' | 'speaking';
 
 function clock(seconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
@@ -48,12 +49,12 @@ function clock(seconds: number) {
 function glowFor(phase: Phase): GlowMode {
   if (phase === 'listening') return 'listening';
   if (phase === 'speaking') return 'speaking';
-  if (phase === 'transcribing' || phase === 'answering') return 'thinking';
+  if (phase === 'answering') return 'thinking';
   return 'idle';
 }
 
 type VoiceDockProps = {
-  /** False when the server has no speech-to-text: the dock says so instead of listening. */
+  /** False when this account can't ask by voice: the dock says so instead of listening. */
   available: boolean;
   /** The voice's loudness is written here, for the light behind the chat. */
   level: SharedValue<number>;
@@ -77,8 +78,9 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
   const [note, setNote] = useState('');
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(muted);
+  // The server can answer with its own voice; otherwise the phone reads the answer aloud.
+  const voiceReplies = useFeatures()?.voice_replies === true;
   const mounted = useRef(true);
-  const streaming = useLiveStore((state) => Boolean(state.answer?.text));
 
   useEffect(() => {
     mutedRef.current = muted;
@@ -123,37 +125,33 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
 
   async function finishListening() {
     haptics.light();
-    setPhase('transcribing');
+    setPhase('answering');
     let uri: string | null = null;
     try {
       uri = await recorder.stop();
       if (!uri) throw new Error('Nothing was recorded.');
-      const audio = await readUriBase64(uri);
-      const { text } = await transcribe({ audio, mimeType: RECORDING_MIME_TYPE });
-      if (!mounted.current) return;
-      if (!text) {
-        setNote("I didn't catch that. Tap the mic and try again.");
-        setPhase('idle');
-        return;
-      }
-      setPhase('answering');
-      const answer = await sendMessage(text, []);
+      const base64 = await readUriBase64(uri);
+      const { answer, voiceReply } = await sendVoice(
+        { media_type: RECORDING_MIME_TYPE, base64 },
+        { replyAsVoice: voiceReplies && !mutedRef.current },
+      );
       if (!mounted.current) return;
       if (!answer) {
         setNote("Couldn't send that. Check the connection and try again.");
         setPhase('idle');
         return;
       }
-      if (answer.images.length > 0) setNote('I made a picture. It is in the chat.');
-      if (answer.status === 'error') setNote(answer.note ?? 'The answer stopped.');
+      if (answer.status === 'error') setNote(answer.note ?? "Couldn't get an answer.");
       if (answer.status !== 'done' || !answer.text || mutedRef.current) {
         setPhase('idle');
         return;
       }
       setPhase('speaking');
-      void speak(answer.id, answer.text, () => {
+      const spoken = () => {
         if (mounted.current) setPhase((current) => (current === 'speaking' ? 'idle' : current));
-      });
+      };
+      if (voiceReply) playVoiceReply(answer.id, voiceReply, answer.text, spoken);
+      else void speak(answer.id, answer.text, spoken);
     } catch (error) {
       if (!mounted.current) return;
       setNote(error instanceof Error ? error.message : 'Something went wrong.');
@@ -188,7 +186,7 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
       const uri = await recorder.stop().catch(() => null);
       if (uri) deleteUri(uri);
     }
-    if (phase === 'answering') stopAnswer();
+    // A question already sent still gets its answer in the chat.
     onEnd();
   }
 
@@ -215,25 +213,24 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
         void startListening();
         break;
       case 'answering':
-        haptics.rigid();
-        stopAnswer();
-        break;
-      case 'transcribing':
         break;
     }
   }
 
   function toggleSpeaker() {
     haptics.selection();
-    if (!muted && phase === 'speaking') stopSpeaking();
+    if (!muted && phase === 'speaking') {
+      // A stopped answer doesn't call its end, so the dock goes back to idle here.
+      stopSpeaking();
+      setPhase('idle');
+    }
     setMuted(!muted);
   }
 
   let status = 'Tap the mic and start talking';
-  if (!available) status = "Voice isn't set up on this server yet";
+  if (!available) status = "Voice isn't turned on for your account";
   else if (phase === 'listening') status = `Listening  ${clock(recorder.seconds)}`;
-  else if (phase === 'transcribing') status = 'Getting your words';
-  else if (phase === 'answering') status = streaming ? 'Answering' : 'Thinking';
+  else if (phase === 'answering') status = 'Getting your answer';
   else if (phase === 'speaking') status = 'Speaking · tap to interrupt';
   else if (note) status = note;
 
@@ -242,8 +239,6 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
   if (phase === 'listening') {
     talkLabel = 'Send what I said';
     TalkGlyph = ArrowUpIcon;
-  } else if (phase === 'answering') {
-    talkLabel = 'Stop answer';
   } else if (phase === 'speaking') {
     talkLabel = 'Interrupt and talk';
   }
@@ -276,11 +271,6 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
           {status}
         </AppText>
       </View>
-      {!available ? (
-        <AppText variant="caption" color={colors.textTertiary} style={styles.setup}>
-          Add a speech-to-text key to the server to talk.
-        </AppText>
-      ) : null}
 
       <View style={styles.row}>
         <SideButton
@@ -293,16 +283,14 @@ export function VoiceDock({ available, level, onGlowChange, onEnd }: VoiceDockPr
           <Animated.View pointerEvents="none" style={[styles.ring, ringStyle]} />
           <PressableScale
             accessibilityRole="button"
-            accessibilityLabel={phase === 'transcribing' ? 'Getting your words' : talkLabel}
-            accessibilityState={{ busy: phase === 'transcribing', disabled: !available }}
-            disabled={!available || phase === 'transcribing'}
+            accessibilityLabel={phase === 'answering' ? 'Getting your answer' : talkLabel}
+            accessibilityState={{ busy: phase === 'answering', disabled: !available }}
+            disabled={!available || phase === 'answering'}
             onPress={handleTalk}
             style={[styles.talk, !available && styles.talkOff]}
           >
-            {phase === 'transcribing' ? (
+            {phase === 'answering' ? (
               <ActivityIndicator color={colors.onPrimary} />
-            ) : phase === 'answering' ? (
-              <View style={styles.square} />
             ) : (
               <TalkGlyph size={26} color={available ? colors.onPrimary : colors.textTertiary} />
             )}
@@ -357,11 +345,6 @@ const useStyles = makeStyles(({ colors, dark }) => ({
     textAlign: 'center',
     flexShrink: 1,
   },
-  setup: {
-    marginTop: -spacing.sm,
-    textAlign: 'center',
-    paddingHorizontal: spacing['2xl'],
-  },
   dot: {
     width: DOT,
     height: DOT,
@@ -412,11 +395,5 @@ const useStyles = makeStyles(({ colors, dark }) => ({
   },
   talkOff: {
     backgroundColor: colors.fillStrong,
-  },
-  square: {
-    width: 18,
-    height: 18,
-    borderRadius: 4,
-    backgroundColor: colors.onPrimary,
   },
 }));

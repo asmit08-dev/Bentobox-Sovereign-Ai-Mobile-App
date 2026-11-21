@@ -21,6 +21,27 @@ export async function keepFile(sourceUri: string, _fileName: string) {
   return { path, size: Math.round((base64Of(path).length * 3) / 4) };
 }
 
+const MIME_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  ogg: 'audio/ogg',
+  pdf: 'application/pdf',
+};
+
+/** Keeps base64 data as a data URL, which is both the `path` and the `uri`. */
+export async function writeBase64File(
+  fileName: string,
+  base64: string,
+  _folder: 'attachments' | 'cache',
+) {
+  const extension = fileName.slice(fileName.lastIndexOf('.') + 1).toLowerCase();
+  const mimeType = MIME_TYPES[extension] ?? 'application/octet-stream';
+  const path = `data:${mimeType};base64,${base64}`;
+  return { path, uri: path, size: Math.round((base64.length * 3) / 4) };
+}
+
 export function fileUri(path: string) {
   return path;
 }
@@ -43,6 +64,8 @@ export async function readUriBase64(uri: string) {
 }
 
 export function deleteFile(_path: string) {}
+
+export function deleteAllAttachments() {}
 
 export function deleteUri(_uri: string) {}
 

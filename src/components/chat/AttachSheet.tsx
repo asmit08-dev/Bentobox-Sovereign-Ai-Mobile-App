@@ -27,7 +27,7 @@ const CHOICES: Choice[] = [
     icon: ImagesIcon,
     run: addPhotosFromLibrary,
   },
-  { label: 'Files', hint: 'PDF and text files', icon: FileTextIcon, run: addDocuments },
+  { label: 'Files', hint: 'PDF and pictures', icon: FileTextIcon, run: addDocuments },
 ];
 
 const TILE_HEIGHT = 92;

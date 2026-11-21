@@ -1,5 +1,7 @@
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
+import { MicrophoneIcon } from 'phosphor-react-native/src/icons/Microphone';
+import { PaperclipIcon } from 'phosphor-react-native/src/icons/Paperclip';
 import { WarningCircleIcon } from 'phosphor-react-native/src/icons/WarningCircle';
 import { Pressable, Text, View } from 'react-native';
 
@@ -10,7 +12,7 @@ import { retrySend } from '@/chat/engine';
 import type { UserMessage } from '@/chat/types';
 import { fileUri } from '@/lib/files';
 import { makeStyles, useTheme } from '@/theme/theme';
-import { fontScaleCap, radius, spacing, typography } from '@/theme/tokens';
+import { fontScaleCap, radius, sizes, spacing, typography } from '@/theme/tokens';
 
 const PHOTO = 120;
 
@@ -21,13 +23,19 @@ type UserMessageViewProps = {
   isLast: boolean;
 };
 
-/** What the user sent: photos and files above a soft gray bubble, on the right. */
+/**
+ * What the user sent: photos and files above a soft gray bubble, on the right. A question asked
+ * by voice shows "Voice message…" until the server's transcript arrives. Files sent from another
+ * device can't be shown (the server never sends them back), so a small chip counts them.
+ */
 export function UserMessageView({ chatId, message, isLast }: UserMessageViewProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const photos = message.attachments.filter((file) => file.kind === 'image');
   const documents = message.attachments.filter((file) => file.kind !== 'image');
   const failed = message.status === 'failed';
+  const elsewhere = message.attachments.length === 0 ? (message.attachmentCount ?? 0) : 0;
+  const listening = message.voice === true && !message.text;
 
   return (
     <View style={styles.column}>
@@ -59,6 +67,26 @@ export function UserMessageView({ chatId, message, isLast }: UserMessageViewProp
       {documents.map((document) => (
         <DocumentCard key={document.id} attachment={document} />
       ))}
+
+      {elsewhere > 0 ? (
+        <View style={styles.chip}>
+          <PaperclipIcon size={sizes.icon.action} color={colors.textSecondary} />
+          <AppText variant="label" color={colors.textSecondary}>
+            {elsewhere === 1 ? '1 attachment' : `${elsewhere} attachments`}
+          </AppText>
+        </View>
+      ) : null}
+
+      {listening ? (
+        <View style={styles.bubbleRow}>
+          <View style={[styles.bubble, styles.voiceBubble]}>
+            <MicrophoneIcon size={sizes.icon.action} color={colors.textSecondary} />
+            <AppText variant="body" color={colors.textSecondary}>
+              Voice message…
+            </AppText>
+          </View>
+        </View>
+      ) : null}
 
       {message.text ? (
         <View style={styles.bubbleRow}>
@@ -128,5 +156,20 @@ const useStyles = makeStyles(({ colors }) => ({
   text: {
     ...typography.body,
     color: colors.text,
+  },
+  voiceBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.fill,
+    borderRadius: radius.full,
+    borderCurve: 'continuous',
   },
 }));

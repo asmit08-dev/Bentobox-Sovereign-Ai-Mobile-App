@@ -16,6 +16,12 @@ export type DraftAttachment = {
   error?: string;
 };
 
+/** Deletes a file's saved copy, and for a PDF the pictures of its pages. */
+export function deleteAttachmentFiles(attachment: Pick<Attachment, 'path' | 'pages'>) {
+  deleteFile(attachment.path);
+  for (const page of attachment.pages ?? []) deleteFile(page.path);
+}
+
 /** Most files one message can carry. */
 export const MAX_ATTACHMENTS = 6;
 
@@ -44,7 +50,7 @@ export const useComposerStore = create<ComposerState>()((set, get) => ({
     })),
   removeAttachment: (id) => {
     const item = get().attachments.find((entry) => entry.id === id);
-    if (item?.attachment) deleteFile(item.attachment.path);
+    if (item?.attachment) deleteAttachmentFiles(item.attachment);
     set((state) => ({ attachments: state.attachments.filter((entry) => entry.id !== id) }));
   },
   clear: () => set({ draft: '', attachments: [] }),

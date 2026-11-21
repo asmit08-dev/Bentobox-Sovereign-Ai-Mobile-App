@@ -99,8 +99,19 @@ export async function speak(id: string, markdown: string, onEnd?: () => void) {
   });
 }
 
+// Another sound that counts as speaking: the server's spoken answer (lib/voiceReply.ts).
+let stopOther: (() => void) | null = null;
+
+/** Registers how to stop the sound playing now (null when it ended), so stopSpeaking() can. */
+export function setOtherSpeech(stop: (() => void) | null) {
+  stopOther = stop;
+}
+
 export function stopSpeaking() {
   turn++;
+  const other = stopOther;
+  stopOther = null;
+  other?.();
   if (useSpeechStore.getState().speakingId !== null) useSpeechStore.setState({ speakingId: null });
   Speech.stop();
 }

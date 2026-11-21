@@ -29,27 +29,22 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import type { CreatedImage } from '@/api/contract';
-import { CreatedImageView, aspectOf } from '@/components/chat/CreatedImageView';
-import { AppText } from '@/components/ui/AppText';
 import { IconButton } from '@/components/ui/IconButton';
 import type { Attachment } from '@/chat/types';
 import { withAlpha } from '@/lib/color';
 import { fileUri } from '@/lib/files';
-import { shareCreatedImage, shareFile } from '@/lib/share';
+import { shareFile } from '@/lib/share';
 import { useChatsStore } from '@/stores/chats';
 import { springs } from '@/theme/motion';
 import { fixed, spacing } from '@/theme/tokens';
 
 const MAX_ZOOM = 4;
 const DOUBLE_TAP_ZOOM = 2.5;
-// A soft black shade at the bottom, so the caption and dots stay readable over any picture.
+// A soft black shade at the bottom, so the dots stay readable over any picture.
 const SHADE_HEIGHT = 200;
 const SHADE_COLORS = [withAlpha(fixed.black, 0), withAlpha(fixed.black, 0.72)] as const;
 
-type Picture =
-  | { key: string; kind: 'photo'; attachment: Attachment }
-  | { key: string; kind: 'created'; image: CreatedImage };
+type Picture = { key: string; attachment: Attachment };
 
 function usePictures(chatId?: string, messageId?: string): Picture[] {
   const message = useChatsStore((state) =>
@@ -57,13 +52,10 @@ function usePictures(chatId?: string, messageId?: string): Picture[] {
       ? state.chats[chatId]?.messages.find((entry) => entry.id === messageId)
       : undefined,
   );
-  if (!message) return [];
-  if (message.role === 'user') {
-    return message.attachments
-      .filter((file) => file.kind === 'image')
-      .map((attachment) => ({ key: attachment.id, kind: 'photo', attachment }));
-  }
-  return message.images.map((image) => ({ key: image.id, kind: 'created', image }));
+  if (message?.role !== 'user') return [];
+  return message.attachments
+    .filter((file) => file.kind === 'image')
+    .map((attachment) => ({ key: attachment.id, attachment }));
 }
 
 /** Full-screen pictures on black: pinch or double-tap to zoom, swipe down to close. */
@@ -86,11 +78,7 @@ export default function ViewerScreen() {
   async function share() {
     const picture = pictures[page];
     if (!picture) return;
-    if (picture.kind === 'photo') {
-      await shareFile(fileUri(picture.attachment.path), picture.attachment.mimeType);
-    } else {
-      await shareCreatedImage(picture.image);
-    }
+    await shareFile(fileUri(picture.attachment.path), picture.attachment.mimeType);
   }
 
   function onPageScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
@@ -106,9 +94,6 @@ export default function ViewerScreen() {
     );
   }
 
-  const shown = pictures[Math.min(page, pictures.length - 1)];
-  const caption = shown.kind === 'created' ? shown.image.alt : '';
-
   const renderPicture = (picture: Picture) => (
     <ZoomablePage
       width={width}
@@ -118,20 +103,12 @@ export default function ViewerScreen() {
       onZoomChange={setZoomed}
       onDismiss={close}
     >
-      {picture.kind === 'photo' ? (
-        <Image
-          source={{ uri: fileUri(picture.attachment.path) }}
-          style={{ width, height }}
-          contentFit="contain"
-          accessibilityLabel={picture.attachment.name}
-        />
-      ) : (
-        <CreatedImageView
-          image={picture.image}
-          width={width}
-          height={Math.min(height, width / aspectOf(picture.image))}
-        />
-      )}
+      <Image
+        source={{ uri: fileUri(picture.attachment.path) }}
+        style={{ width, height }}
+        contentFit="contain"
+        accessibilityLabel={picture.attachment.name}
+      />
     </ZoomablePage>
   );
 
@@ -169,25 +146,12 @@ export default function ViewerScreen() {
         />
       </Animated.View>
 
-      {caption || pictures.length > 1 ? (
+      {pictures.length > 1 ? (
         <Animated.View
           style={[styles.bottom, { paddingBottom: insets.bottom + spacing.xl }, chromeStyle]}
           pointerEvents="none"
         >
           <LinearGradient colors={SHADE_COLORS} style={styles.shade} />
-          {caption ? (
-            // What the assistant made, in its own words. Screen readers get it from the picture.
-            <AppText
-              variant="bodySm"
-              color={withAlpha(fixed.white, 0.86)}
-              numberOfLines={3}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-              style={styles.caption}
-            >
-              {caption}
-            </AppText>
-          ) : null}
           {pictures.length > 1 ? (
             <View style={styles.dots}>
               {pictures.map((picture, index) => (
@@ -358,10 +322,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: SHADE_HEIGHT,
-  },
-  caption: {
-    textAlign: 'center',
-    maxWidth: 320,
   },
   dots: {
     flexDirection: 'row',

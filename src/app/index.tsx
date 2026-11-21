@@ -19,7 +19,6 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { useCapabilities } from '@/api/endpoints';
 import { AttachSheet } from '@/components/chat/AttachSheet';
 import { ChatHeader, useHeaderHeight } from '@/components/chat/ChatHeader';
 import { Composer } from '@/components/chat/Composer';
@@ -27,16 +26,19 @@ import { EmptyState } from '@/components/chat/EmptyState';
 import { HistoryDrawer } from '@/components/chat/HistoryDrawer';
 import { MessageList } from '@/components/chat/MessageList';
 import { SettingsSheet } from '@/components/chat/SettingsSheet';
+import { AppText } from '@/components/ui/AppText';
 import { HorizonGlow, type GlowMode } from '@/components/voice/HorizonGlow';
 import { VoiceDock } from '@/components/voice/VoiceDock';
 import { sendMessage } from '@/chat/engine';
+import { refreshChats, syncChat } from '@/chat/sync';
 import type { Attachment } from '@/chat/types';
 import { haptics } from '@/lib/haptics';
 import { stopSpeaking } from '@/lib/speech';
+import { useFeatures } from '@/stores/auth';
 import { useActiveChat, useChatsStore } from '@/stores/chats';
 import { useComposerStore } from '@/stores/composer';
 import { fadeIn, fadeInOnly, fadeOut, riseIn, springs } from '@/theme/motion';
-import { makeStyles } from '@/theme/theme';
+import { makeStyles, useTheme } from '@/theme/theme';
 import { sizes, spacing } from '@/theme/tokens';
 
 const EDGE_WIDTH = 20;
@@ -50,13 +52,15 @@ const DIM = 0.5;
 /** The chat screen: a new chat (greeting and suggestions) or a conversation, with the history drawer. */
 export default function ChatScreen() {
   const styles = useStyles();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const headerHeight = useHeaderHeight();
   const reduceMotion = useReducedMotion();
   const inputRef = useRef<TextInputInstance>(null);
   const chat = useActiveChat();
-  const capabilities = useCapabilities();
+  const features = useFeatures();
+  const voiceAvailable = features?.audio_questions === true;
   const [scrolled, setScrolled] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   // The "+" sheet: attachOpen is what the user asked for; it stays mounted until it has slid away.
@@ -73,6 +77,18 @@ export default function ChatScreen() {
   const drawerWidth = Math.min(Math.round(width * 0.84), sizes.drawerMaxWidth);
 
   const isEmpty = !chat || chat.messages.length === 0;
+  const chatId = chat?.id;
+  const closed = chat?.canContinue === false;
+
+  // The chat list, fresh from the server, when the app opens. Offline is fine: the copy shows.
+  useEffect(() => {
+    refreshChats().catch(() => {});
+  }, []);
+
+  // Opening a chat shows the phone's copy at once, then the server's newest messages.
+  useEffect(() => {
+    if (chatId) syncChat(chatId).catch(() => {});
+  }, [chatId]);
 
   // Once voice mode has ended, the light sinks, then goes away.
   useEffect(() => {
@@ -232,12 +248,7 @@ export default function ChatScreen() {
           >
             <View style={styles.fill}>
               {isEmpty ? (
-                <EmptyState
-                  topInset={headerHeight}
-                  inputRef={inputRef}
-                  imageGeneration={capabilities.imageGeneration}
-                  voice={voiceOn}
-                />
+                <EmptyState topInset={headerHeight} inputRef={inputRef} voice={voiceOn} />
               ) : (
                 <MessageList
                   key={chat.id}
@@ -268,11 +279,17 @@ export default function ChatScreen() {
                   exiting={fadeOut()}
                 >
                   <VoiceDock
-                    available={capabilities.voiceInput}
+                    available={voiceAvailable}
                     level={voiceLevel}
                     onGlowChange={setGlowMode}
                     onEnd={endVoice}
                   />
+                </Animated.View>
+              ) : closed ? (
+                <Animated.View key="closed" entering={fadeIn()} exiting={fadeOut()}>
+                  <AppText variant="bodySm" color={colors.textSecondary} style={styles.closed}>
+                    {"This chat can't continue. Start a new chat."}
+                  </AppText>
                 </Animated.View>
               ) : (
                 <Animated.View key="composer" entering={fadeIn()} exiting={fadeOut()}>
@@ -390,5 +407,9 @@ const useStyles = makeStyles(({ colors, dark }) => ({
   },
   scrim: {
     backgroundColor: colors.scrim,
+  },
+  closed: {
+    textAlign: 'center',
+    paddingVertical: spacing.lg,
   },
 }));

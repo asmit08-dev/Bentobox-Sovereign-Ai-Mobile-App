@@ -11,10 +11,11 @@ import {
 import Animated from 'react-native-reanimated';
 
 import { AttachmentStrip } from '@/components/chat/AttachmentStrip';
+import { MAX_QUESTION_CHARS } from '@/chat/askBody';
 import { SendButton, type PrimaryMode } from '@/components/chat/SendButton';
-import { stopAnswer } from '@/chat/engine';
 import type { Attachment } from '@/chat/types';
 import { ASSISTANT_NAME } from '@/lib/brand';
+import { useFeatures } from '@/stores/auth';
 import { useComposerStore } from '@/stores/composer';
 import { useIsAnswering } from '@/stores/live';
 import { smoothLayout } from '@/theme/motion';
@@ -37,7 +38,7 @@ type ComposerProps = {
  * Where the user writes: one soft gray card with the text on top and the tools under it.
  * Attached files wait inside the card, above the text. The strong round button on the right
  * opens voice mode while the card is empty (voice bars, no text), sends once there is
- * something to send, and stops an answer while it streams.
+ * something to send, and shows a spinner while a question waits for its answer.
  */
 export function Composer({ variant, inputRef, onSend, onAttach, onVoice }: ComposerProps) {
   const theme = useTheme();
@@ -47,6 +48,7 @@ export function Composer({ variant, inputRef, onSend, onAttach, onVoice }: Compo
   const setDraft = useComposerStore((state) => state.setDraft);
   const items = useComposerStore((state) => state.attachments);
   const removeAttachment = useComposerStore((state) => state.removeAttachment);
+  const picturesAllowed = useFeatures()?.images !== false;
   const answering = useIsAnswering();
 
   const message = draft.trim();
@@ -58,7 +60,7 @@ export function Composer({ variant, inputRef, onSend, onAttach, onVoice }: Compo
   const canSend = !answering && !preparing && (message.length > 0 || ready.length > 0);
 
   let mode: PrimaryMode = 'speak';
-  if (answering) mode = 'stop';
+  if (answering) mode = 'waiting';
   else if (hasContent) mode = 'send';
 
   function send() {
@@ -81,6 +83,7 @@ export function Composer({ variant, inputRef, onSend, onAttach, onVoice }: Compo
         placeholderTextColor={colors.textTertiary}
         accessibilityLabel="Message"
         multiline
+        maxLength={MAX_QUESTION_CHARS}
         // Web only: a browser text area starts two rows tall. Phones size it from minHeight.
         rows={Platform.OS === 'web' ? 1 : undefined}
         maxFontSizeMultiplier={fontScaleCap.chrome}
@@ -93,22 +96,21 @@ export function Composer({ variant, inputRef, onSend, onAttach, onVoice }: Compo
       />
 
       <View style={styles.tools}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Attach a file"
-          hitSlop={hitSlopFor(sizes.composerButton)}
-          onPress={onAttach}
-          style={({ pressed }) => [styles.tool, pressed && styles.toolPressed]}
-        >
-          <PlusIcon size={sizes.icon.composer} color={colors.text} />
-        </Pressable>
-        <SendButton
-          mode={mode}
-          enabled={canSend}
-          onSend={send}
-          onStop={stopAnswer}
-          onSpeak={onVoice}
-        />
+        {/* Accounts that can't send pictures (features.images false) get no + button. */}
+        {picturesAllowed ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Attach a file"
+            hitSlop={hitSlopFor(sizes.composerButton)}
+            onPress={onAttach}
+            style={({ pressed }) => [styles.tool, pressed && styles.toolPressed]}
+          >
+            <PlusIcon size={sizes.icon.composer} color={colors.text} />
+          </Pressable>
+        ) : (
+          <View />
+        )}
+        <SendButton mode={mode} enabled={canSend} onSend={send} onSpeak={onVoice} />
       </View>
     </Animated.View>
   );

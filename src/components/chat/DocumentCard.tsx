@@ -7,19 +7,20 @@ import { AppText } from '@/components/ui/AppText';
 import { PressableScale } from '@/components/ui/PressableScale';
 import type { Attachment } from '@/chat/types';
 import { fileUri } from '@/lib/files';
-import { fileTypeLabel, formatBytes } from '@/lib/format';
+import { fileTypeLabel, formatBytes, pdfDetails } from '@/lib/format';
 import { shareFile } from '@/lib/share';
 import { makeStyles, useTheme } from '@/theme/theme';
 import { radius, sizes, spacing } from '@/theme/tokens';
 
-/** A file in the chat: icon, name, "PDF · 2.4 MB", and Share. Tap to open or share it. */
+/** A file in the chat: icon, name, "PDF · 3 pages", and Share. Tap to open or share it. */
 export function DocumentCard({ attachment }: { attachment: Attachment }) {
   const { colors } = useTheme();
   const styles = useStyles();
   const Icon = attachment.kind === 'pdf' ? FilePdfIcon : FileTextIcon;
-  const details = [fileTypeLabel(attachment.name), formatBytes(attachment.size)]
-    .filter(Boolean)
-    .join(' · ');
+  const details =
+    attachment.kind === 'pdf'
+      ? pdfDetails(attachment.pageCount, attachment.pages?.length ?? 0)
+      : [fileTypeLabel(attachment.name), formatBytes(attachment.size)].filter(Boolean).join(' · ');
 
   return (
     <PressableScale

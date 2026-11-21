@@ -1,10 +1,9 @@
 import type { Icon } from 'phosphor-react-native';
 import { CameraIcon } from 'phosphor-react-native/src/icons/Camera';
 import { FileTextIcon } from 'phosphor-react-native/src/icons/FileText';
-import { ImageSquareIcon } from 'phosphor-react-native/src/icons/ImageSquare';
 import { LightningIcon } from 'phosphor-react-native/src/icons/Lightning';
 
-export type SuggestionId = 'summarize' | 'image' | 'photo' | 'brainstorm';
+export type SuggestionId = 'summarize' | 'photo' | 'brainstorm';
 
 export type Suggestion = {
   id: SuggestionId;
@@ -25,13 +24,6 @@ const ALL_SUGGESTIONS: Suggestion[] = [
     prefill: 'Summarize this document.',
   },
   {
-    id: 'image',
-    title: 'Create an image',
-    description: "Describe it and I'll make it.",
-    icon: ImageSquareIcon,
-    prefill: 'Create an image of ',
-  },
-  {
     id: 'photo',
     title: 'Ask about a photo',
     description: 'Add a picture and ask anything.',
@@ -46,7 +38,9 @@ const ALL_SUGGESTIONS: Suggestion[] = [
   },
 ];
 
-/** The tiles to show. "Create an image" only appears when the backend can make images. */
-export function suggestionsFor(imageGeneration: boolean) {
-  return ALL_SUGGESTIONS.filter((suggestion) => suggestion.id !== 'image' || imageGeneration);
+/** The tiles to show. Without pictures, the document and photo tiles go. */
+export function suggestionsFor({ pictures }: { pictures: boolean }) {
+  return pictures
+    ? ALL_SUGGESTIONS
+    : ALL_SUGGESTIONS.filter((suggestion) => suggestion.id === 'brainstorm');
 }

@@ -1,6 +1,6 @@
 import { ArrowUpIcon } from 'phosphor-react-native/src/icons/ArrowUp';
 import { useEffect, useRef } from 'react';
-import { View } from 'react-native';
+import { ActivityIndicator } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -17,36 +17,34 @@ import { fadeIn, fadeOut, springs } from '@/theme/motion';
 import { makeStyles, useTheme } from '@/theme/theme';
 import { hitSlopFor, sizes } from '@/theme/tokens';
 
-const STOP_SQUARE = 11;
-
 /**
  * speak: nothing typed yet; opens voice mode.
  * send: there is something to send.
- * stop: an answer is streaming; stops it.
+ * waiting: a question is waiting for its answer. The server can't cancel a question (it still
+ * answers and counts it), so there is no Stop: the button shows a spinner and can't be pressed.
  */
-export type PrimaryMode = 'speak' | 'send' | 'stop';
+export type PrimaryMode = 'speak' | 'send' | 'waiting';
 
 type SendButtonProps = {
   mode: PrimaryMode;
   /** False while files are still being prepared (only used in "send" mode). */
   enabled: boolean;
   onSend: () => void;
-  onStop: () => void;
   onSpeak: () => void;
 };
 
 /**
  * The composer's one strong button: a circle, black in light mode and white in dark mode.
  * With an empty composer it shows the voice bars and opens voice mode. Typing turns it into
- * the Send arrow, and while an answer streams it becomes Stop. The circle keeps its size;
- * only the icon inside cross-fades.
+ * the Send arrow, and while a question waits for its answer it shows a spinner. The circle keeps
+ * its size; only the icon inside cross-fades.
  */
-export function SendButton({ mode, enabled, onSend, onStop, onSpeak }: SendButtonProps) {
+export function SendButton({ mode, enabled, onSend, onSpeak }: SendButtonProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const reduceMotion = useReducedMotion();
   const wake = useSharedValue(1);
-  const active = mode !== 'send' || enabled;
+  const active = mode === 'speak' || (mode === 'send' && enabled);
   const canSend = mode === 'send' && enabled;
   const couldSend = useRef(canSend);
 
@@ -61,10 +59,8 @@ export function SendButton({ mode, enabled, onSend, onStop, onSpeak }: SendButto
   const wakeStyle = useAnimatedStyle(() => ({ transform: [{ scale: wake.get() }] }));
 
   function handlePress() {
-    if (mode === 'stop') {
-      haptics.rigid();
-      onStop();
-    } else if (mode === 'send') {
+    if (mode === 'waiting') return;
+    if (mode === 'send') {
       haptics.light();
       onSend();
     } else {
@@ -74,7 +70,7 @@ export function SendButton({ mode, enabled, onSend, onStop, onSpeak }: SendButto
   }
 
   let label = 'Send message';
-  if (mode === 'stop') label = 'Stop answer';
+  if (mode === 'waiting') label = 'Waiting for the answer';
   else if (mode === 'speak') label = 'Speak';
 
   const glyph = active ? colors.onPrimary : colors.textTertiary;
@@ -84,7 +80,7 @@ export function SendButton({ mode, enabled, onSend, onStop, onSpeak }: SendButto
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={mode === 'speak' ? 'Opens voice mode' : undefined}
-      accessibilityState={{ disabled: !active }}
+      accessibilityState={{ disabled: !active, busy: mode === 'waiting' }}
       disabled={!active}
       hitSlop={hitSlopFor(sizes.sendButton)}
       onPress={handlePress}
@@ -94,9 +90,9 @@ export function SendButton({ mode, enabled, onSend, onStop, onSpeak }: SendButto
           <Animated.View key="speak" entering={fadeIn()} exiting={fadeOut()} style={styles.icon}>
             <VoiceBarsIcon size={sizes.icon.send} color={glyph} />
           </Animated.View>
-        ) : mode === 'stop' ? (
-          <Animated.View key="stop" entering={fadeIn()} exiting={fadeOut()} style={styles.icon}>
-            <View style={[styles.square, { backgroundColor: glyph }]} />
+        ) : mode === 'waiting' ? (
+          <Animated.View key="waiting" entering={fadeIn()} exiting={fadeOut()} style={styles.icon}>
+            <ActivityIndicator size="small" color={colors.textSecondary} />
           </Animated.View>
         ) : (
           <Animated.View key="send" entering={fadeIn()} exiting={fadeOut()} style={styles.icon}>
@@ -126,10 +122,5 @@ const useStyles = makeStyles(({ colors }) => ({
     position: 'absolute',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  square: {
-    width: STOP_SQUARE,
-    height: STOP_SQUARE,
-    borderRadius: 2.5,
   },
 }));

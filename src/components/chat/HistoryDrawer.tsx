@@ -2,24 +2,37 @@ import { ChatsCircleIcon } from 'phosphor-react-native/src/icons/ChatsCircle';
 import { GearSixIcon } from 'phosphor-react-native/src/icons/GearSix';
 import { MagnifyingGlassIcon } from 'phosphor-react-native/src/icons/MagnifyingGlass';
 import { NotePencilIcon } from 'phosphor-react-native/src/icons/NotePencil';
+import { WifiSlashIcon } from 'phosphor-react-native/src/icons/WifiSlash';
 import { XCircleIcon } from 'phosphor-react-native/src/icons/XCircle';
-import { useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 import { GestureDetector, usePanGesture } from 'react-native-gesture-handler';
 import { withSpring, type SharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
+import { friendlyError, isSessionError } from '@/api/errors';
+import { deleteChat, renameChat } from '@/chat/manage';
+import { loadMoreChats, refreshChats } from '@/chat/sync';
 import { RenameDialog } from '@/components/chat/RenameDialog';
 import { AppText } from '@/components/ui/AppText';
 import { IconButton } from '@/components/ui/IconButton';
 import { Pulse } from '@/components/ui/Pulse';
 import type { Chat } from '@/chat/types';
+import { confirmAction, showProblem } from '@/lib/dialog';
 import { haptics } from '@/lib/haptics';
 import { showMenu } from '@/lib/menu';
 import { stopSpeaking } from '@/lib/speech';
 import { HISTORY_SECTIONS, historySection, shortWhen } from '@/lib/time';
-import { useChatsStore } from '@/stores/chats';
+import { useChatsStore, useDrawerChats } from '@/stores/chats';
 import { springs } from '@/theme/motion';
 import { makeStyles, useTheme } from '@/theme/theme';
 import {
@@ -33,6 +46,8 @@ import {
 } from '@/theme/tokens';
 
 const SEARCH_HEIGHT = 40;
+// The next page of chats loads when the list is scrolled this close to its end.
+const LOAD_MORE_PX = 240;
 
 type HistoryDrawerProps = {
   /** 0 = closed, 1 = open. Shared with the screen, which slides the chat aside. */
@@ -44,14 +59,18 @@ type HistoryDrawerProps = {
   onOpenSettings: () => void;
 };
 
+/** Search looks at the title and the last message's preview. */
 function matches(chat: Chat, query: string) {
-  if (chat.title.toLowerCase().includes(query)) return true;
-  return chat.messages.some((message) => message.text.toLowerCase().includes(query));
+  return (
+    chat.title.toLowerCase().includes(query) || (chat.preview ?? '').toLowerCase().includes(query)
+  );
 }
 
 /**
  * The chat history: search and New chat on top, every chat by day, and Settings at the foot.
  * It fills the screen's full height on the left; the chat slides right to uncover it.
+ * The list is the server's (newest activity first), refreshed each time the drawer opens,
+ * with chats still waiting for their first answer on top. More loads at the end of the list.
  */
 export function HistoryDrawer({
   progress,
@@ -65,23 +84,60 @@ export function HistoryDrawer({
   const { colors } = theme;
   const styles = useStyles();
   const insets = useSafeAreaInsets();
-  const chats = useChatsStore((state) => state.chats);
+  const chats = useDrawerChats();
   const activeChatId = useChatsStore((state) => state.activeChatId);
   const hydrated = useChatsStore((state) => state.hydrated);
+  const nextCursor = useChatsStore((state) => state.nextCursor);
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<Chat | undefined>(undefined);
+  // 'idle' until the first refresh ends; 'failed' when Sovrns couldn't be reached.
+  const [listStatus, setListStatus] = useState<'idle' | 'loaded' | 'failed'>('idle');
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const scrollOffset = useRef(0);
+  const viewportHeight = useRef(0);
+  const contentHeight = useRef(0);
+
+  // The server's list is fetched each time the drawer opens.
+  useEffect(() => {
+    if (!open) return;
+    refreshChats().then(
+      () => setListStatus('loaded'),
+      () => setListStatus('failed'),
+    );
+  }, [open]);
 
   const search = query.trim().toLowerCase();
-  const list = Object.values(chats)
-    .filter((chat) => chat.messages.length > 0)
-    .filter((chat) => !search || matches(chat, search))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const list = search ? chats.filter((chat) => matches(chat, search)) : chats;
   const now = new Date();
   const sections = HISTORY_SECTIONS.map((title) => ({
     title,
     chats: list.filter((chat) => historySection(chat.updatedAt, now) === title),
   })).filter((section) => section.chats.length > 0);
-  const showEmpty = hydrated && sections.length === 0;
+  const waiting = !hydrated || (chats.length === 0 && listStatus === 'idle');
+  const showEmpty = !waiting && sections.length === 0;
+  const canLoadMore = Boolean(nextCursor) && !search;
+
+  function pullToRefresh() {
+    setRefreshing(true);
+    refreshChats()
+      .then(
+        () => setListStatus('loaded'),
+        () => setListStatus('failed'),
+      )
+      .finally(() => setRefreshing(false));
+  }
+
+  function loadMoreNearEnd() {
+    // The sizes are known only after the list has been laid out.
+    if (!canLoadMore || loadingMore || contentHeight.current === 0) return;
+    const end = contentHeight.current - LOAD_MORE_PX;
+    if (scrollOffset.current + viewportHeight.current < end) return;
+    setLoadingMore(true);
+    loadMoreChats()
+      .catch(() => {})
+      .finally(() => setLoadingMore(false));
+  }
 
   // Drag the drawer to the left to close it.
   const pan = usePanGesture({
@@ -106,18 +162,28 @@ export function HistoryDrawer({
     onClose();
   }
 
-  function confirmDelete(chat: Chat) {
-    Alert.alert('Delete chat?', `"${chat.title}" will be deleted from this phone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          haptics.medium();
-          useChatsStore.getState().deleteChat(chat.id);
-        },
-      },
-    ]);
+  // A session that ended shows the sign-in screen; there is nothing else to say.
+  function explain(title: string, error: unknown) {
+    if (!isSessionError(error)) showProblem(title, friendlyError(error));
+  }
+
+  async function confirmDelete(chat: Chat) {
+    const confirmed = await confirmAction({
+      title: 'Delete chat?',
+      message: 'This chat will be deleted.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!confirmed) return;
+    haptics.medium();
+    deleteChat(chat.id).catch((error: unknown) => explain("Couldn't delete the chat", error));
+  }
+
+  function saveTitle(chat: Chat, title: string) {
+    setRenaming(undefined);
+    renameChat(chat.id, title).catch((error: unknown) =>
+      explain("Couldn't rename the chat", error),
+    );
   }
 
   function openRowMenu(chat: Chat) {
@@ -177,10 +243,34 @@ export function HistoryDrawer({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={pullToRefresh}
+                tintColor={colors.textTertiary}
+                colors={[colors.textTertiary]}
+              />
+            }
+            scrollEventThrottle={100}
+            onLayout={(event) => {
+              viewportHeight.current = event.nativeEvent.layout.height;
+              loadMoreNearEnd();
+            }}
+            onContentSizeChange={(_width, height) => {
+              contentHeight.current = height;
+              loadMoreNearEnd();
+            }}
+            onScroll={(event) => {
+              scrollOffset.current = event.nativeEvent.contentOffset.y;
+              contentHeight.current = event.nativeEvent.contentSize.height;
+              loadMoreNearEnd();
+            }}
           >
-            {!hydrated ? <SkeletonRows /> : null}
+            {waiting ? <SkeletonRows /> : null}
 
-            {showEmpty ? <EmptyHistory searching={search.length > 0} /> : null}
+            {showEmpty ? (
+              <EmptyHistory searching={search.length > 0} failed={listStatus === 'failed'} />
+            ) : null}
 
             {sections.map((section) => (
               <View key={section.title} style={styles.section}>
@@ -199,6 +289,12 @@ export function HistoryDrawer({
                 ))}
               </View>
             ))}
+
+            {canLoadMore && sections.length > 0 ? (
+              <AppText variant="bodySm" color={colors.textTertiary} style={styles.more}>
+                Loading more…
+              </AppText>
+            ) : null}
           </ScrollView>
 
           <View style={[styles.foot, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
@@ -223,10 +319,7 @@ export function HistoryDrawer({
           key={renaming.id}
           title={renaming.title}
           onCancel={() => setRenaming(undefined)}
-          onSave={(title) => {
-            useChatsStore.getState().renameChat(renaming.id, title);
-            setRenaming(undefined);
-          }}
+          onSave={(title) => saveTitle(renaming, title)}
         />
       ) : null}
     </View>
@@ -245,8 +338,19 @@ type ChatRowProps = {
 /** One chat: its name on one line. The open chat sits on a soft gray pill. */
 function ChatRow({ chat, active, when, onPress, onLongPress }: ChatRowProps) {
   const styles = useStyles();
+  // In the web preview, a right-click opens the same menu as a long-press.
+  const webMenu =
+    Platform.OS === 'web'
+      ? {
+          onContextMenu: (event: { preventDefault: () => void }) => {
+            event.preventDefault();
+            onLongPress();
+          },
+        }
+      : null;
   return (
     <Pressable
+      {...webMenu}
       accessibilityRole="button"
       accessibilityLabel={`${chat.title}, ${when}`}
       accessibilityState={{ selected: active }}
@@ -267,10 +371,17 @@ function ChatRow({ chat, active, when, onPress, onLongPress }: ChatRowProps) {
   );
 }
 
-/** No chats yet, or none that match the search. */
-function EmptyHistory({ searching }: { searching: boolean }) {
+const EMPTY_TEXT = {
+  searching: { title: 'No matches', body: 'Try a different word.' },
+  failed: { title: "Can't load your chats", body: 'Check your internet connection and try again.' },
+  none: { title: 'No chats yet', body: 'Your chats will show up here.' },
+};
+
+/** No chats yet, none that match the search, or the list couldn't be loaded. */
+function EmptyHistory({ searching, failed }: { searching: boolean; failed: boolean }) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const text = EMPTY_TEXT[searching ? 'searching' : failed ? 'failed' : 'none'];
   return (
     <View
       style={[styles.empty, searching && styles.emptySearching]}
@@ -279,15 +390,17 @@ function EmptyHistory({ searching }: { searching: boolean }) {
       <View style={styles.emptyMark}>
         {searching ? (
           <MagnifyingGlassIcon size={sizes.icon.header} color={colors.textTertiary} />
+        ) : failed ? (
+          <WifiSlashIcon size={sizes.icon.header} color={colors.textTertiary} />
         ) : (
           <ChatsCircleIcon size={sizes.icon.header} color={colors.textTertiary} />
         )}
       </View>
       <AppText variant="titleSm" style={styles.emptyText}>
-        {searching ? 'No matches' : 'No chats yet'}
+        {text.title}
       </AppText>
       <AppText variant="bodySm" color={colors.textSecondary} style={styles.emptyText}>
-        {searching ? 'Try a different word.' : 'Your chats will show up here.'}
+        {text.body}
       </AppText>
     </View>
   );
@@ -372,6 +485,10 @@ const useStyles = makeStyles(({ colors }) => ({
   },
   pressedRow: {
     backgroundColor: colors.pressed,
+  },
+  more: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
   },
   foot: {
     paddingTop: spacing.xs,

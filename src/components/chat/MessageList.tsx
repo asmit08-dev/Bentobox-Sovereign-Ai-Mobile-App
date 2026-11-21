@@ -3,23 +3,25 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Platform,
+  Pressable,
   StyleSheet,
   View,
-  useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
 import Animated, { useReducedMotion } from 'react-native-reanimated';
 
+import { loadOlderMessages } from '@/chat/sync';
 import { AssistantMessageView } from '@/components/chat/AssistantMessageView';
 import { ScrollToBottomButton } from '@/components/chat/ScrollToBottomButton';
 import { UserMessageView } from '@/components/chat/UserMessageView';
+import { AppText } from '@/components/ui/AppText';
 import type { Chat, Message } from '@/chat/types';
 import { withAlpha } from '@/lib/color';
 import { useLiveStore } from '@/stores/live';
 import { fadeInOnly, riseIn } from '@/theme/motion';
 import { useTheme } from '@/theme/theme';
-import { spacing } from '@/theme/tokens';
+import { sizes, spacing } from '@/theme/tokens';
 
 // Closer than this to the end counts as "at the bottom".
 const BOTTOM_SLACK = 48;
@@ -61,6 +63,42 @@ function MessageRow({ message, children }: { message: Message; children: ReactNo
   );
 }
 
+const EARLIER_TEXT = {
+  idle: 'Load earlier messages',
+  loading: 'Loading…',
+  failed: "Couldn't load them. Tap to try again.",
+};
+
+/** At the top of a chat whose older messages are on the server: gets the page before. */
+function LoadEarlier({ chatId }: { chatId: string }) {
+  const { colors } = useTheme();
+  const [state, setState] = useState<keyof typeof EARLIER_TEXT>('idle');
+
+  function load() {
+    setState('loading');
+    loadOlderMessages(chatId).then(
+      () => setState('idle'),
+      () => setState('failed'),
+    );
+  }
+
+  return (
+    <View style={styles.earlier}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ busy: state === 'loading' }}
+        disabled={state === 'loading'}
+        onPress={load}
+        style={styles.earlierButton}
+      >
+        <AppText variant="label" color={colors.textSecondary}>
+          {EARLIER_TEXT[state]}
+        </AppText>
+      </Pressable>
+    </View>
+  );
+}
+
 function latestAssistantId(messages: Message[]) {
   for (let index = messages.length - 1; index >= 0; index--) {
     if (messages[index].role === 'assistant') return messages[index].id;
@@ -80,7 +118,6 @@ export function MessageList({
 }: MessageListProps) {
   const { colors } = useTheme();
   const listRef = useRef<FlashListRef<Message>>(null);
-  const { width } = useWindowDimensions();
   const streamingHere = useLiveStore((state) => state.answer?.chatId === chat.id);
   const [showJump, setShowJump] = useState(false);
   const atBottom = useRef(true);
@@ -92,8 +129,6 @@ export function MessageList({
   const { messages } = chat;
   const lastId = messages[messages.length - 1]?.id;
   const latestAnswerId = latestAssistantId(messages);
-  // What an answer can use: the screen minus the gutters.
-  const contentWidth = width - spacing.gutter * 2;
 
   // A new message (sent, or sent again) always brings the view down to it.
   useEffect(() => {
@@ -134,7 +169,7 @@ export function MessageList({
         data={messages}
         keyExtractor={(message) => message.id}
         getItemType={(message) => message.role}
-        extraData={`${latestAnswerId}|${lastId}|${contentWidth}`}
+        extraData={`${latestAnswerId}|${lastId}`}
         renderItem={({ item, index }) => (
           <View style={[styles.item, index > 0 && styles.spaced]}>
             <MessageRow message={item}>
@@ -145,12 +180,14 @@ export function MessageList({
                   chatId={chat.id}
                   message={item}
                   isLatest={item.id === latestAnswerId}
-                  contentWidth={contentWidth}
                 />
               )}
             </MessageRow>
           </View>
         )}
+        ListHeaderComponent={
+          chat.olderBefore != null ? <LoadEarlier key={chat.id} chatId={chat.id} /> : null
+        }
         maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
         contentContainerStyle={{ paddingTop: topInset + spacing.lg, paddingBottom: FADE_HEIGHT }}
         onScroll={handleScroll}
@@ -214,6 +251,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: FADE_HEIGHT,
+  },
+  earlier: {
+    alignItems: 'center',
+    paddingBottom: spacing.md,
+  },
+  earlierButton: {
+    minHeight: sizes.minTouch,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
   },
   jump: {
     position: 'absolute',

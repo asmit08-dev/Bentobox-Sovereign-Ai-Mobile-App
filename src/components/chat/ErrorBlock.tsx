@@ -12,13 +12,13 @@ import { hitSlopFor, radius, sizes, spacing } from '@/theme/tokens';
 const RETRY_HEIGHT = 32;
 
 type ErrorBlockProps = {
-  /** Why it stopped, from the server. */
+  /** Why, in plain words. */
   detail?: string;
   /** Shown only on the newest answer. */
   onRetry?: () => void;
 };
 
-/** Under an answer that broke: "The answer stopped." with the reason and Retry. */
+/** Under a question that got no answer: "Couldn't get an answer." with the reason and Retry. */
 export function ErrorBlock({ detail, onRetry }: ErrorBlockProps) {
   const { colors } = useTheme();
   const styles = useStyles();
@@ -27,7 +27,7 @@ export function ErrorBlock({ detail, onRetry }: ErrorBlockProps) {
       <WarningCircleIcon size={20} color={colors.danger} weight="fill" />
       <View style={styles.text}>
         <AppText variant="bodySm" color={colors.danger}>
-          The answer stopped.
+          {"Couldn't get an answer."}
         </AppText>
         {detail ? (
           <AppText variant="caption" color={colors.danger}>

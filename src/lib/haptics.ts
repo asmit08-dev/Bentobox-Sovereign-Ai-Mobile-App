@@ -18,7 +18,7 @@ export const haptics = {
   rigid: () => play(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid)),
   /** Image ready. */
   soft: () => play(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft)),
-  /** Suggestion tile tap, attachment added, thumbs. */
+  /** Suggestion tile tap, attachment added. */
   selection: () => play(() => Haptics.selectionAsync()),
   /** Copy. */
   success: () => play(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)),

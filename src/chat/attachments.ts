@@ -1,35 +1,38 @@
-// Adding photos and documents to the composer.
+// Adding photos, pictures and PDFs to the composer.
 // Photos are always shrunk and turned into JPEG (iPhones take HEIC, which the AI can't read).
+// A PDF is drawn page by page into JPEGs when it is added: the server reads pictures, not PDFs.
 import * as DocumentPicker from 'expo-document-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert } from 'react-native';
 
-import type { Attachment, AttachmentKind } from '@/chat/types';
-import { deleteFile, keepFile } from '@/lib/files';
+import type { Attachment, AttachmentKind, PageImage } from '@/chat/types';
+import { showProblem } from '@/lib/dialog';
+import { keepFile, readBase64, writeBase64File } from '@/lib/files';
 import { haptics } from '@/lib/haptics';
 import { newId } from '@/lib/id';
-import { MAX_ATTACHMENTS, useComposerStore, type DraftAttachment } from '@/stores/composer';
+import { PDF_CANT_OPEN, renderPdfPages } from '@/lib/pdf/renderPdf';
+import { useAuthStore } from '@/stores/auth';
+import {
+  MAX_ATTACHMENTS,
+  deleteAttachmentFiles,
+  useComposerStore,
+  type DraftAttachment,
+} from '@/stores/composer';
 
 // The longest side of a photo we send. Bigger photos cost more and are not read better.
 const MAX_IMAGE_EDGE = 1568;
 const MAX_PDF_BYTES = 15 * 1024 * 1024;
-const MAX_TEXT_BYTES = 512 * 1024;
-
-const TEXT_TYPES = [
-  'text/plain',
-  'text/markdown',
-  'text/x-markdown',
-  'text/csv',
-  'text/comma-separated-values',
-  'application/json',
-];
-const TEXT_EXTENSIONS = ['txt', 'md', 'markdown', 'csv', 'json'];
+// PDF pages: long side and JPEG quality. Small print stays readable.
+const PAGE_EDGE = 1400;
+const PAGE_QUALITY = 0.7;
+const DEFAULT_PAGES_MAX = 50;
+const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
+const PICTURE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'];
 
 function slotsLeft() {
   const left = MAX_ATTACHMENTS - useComposerStore.getState().attachments.length;
   if (left <= 0) {
-    Alert.alert('Too many files', `You can add up to ${MAX_ATTACHMENTS} files to one message.`);
+    showProblem('Too many files', `You can add up to ${MAX_ATTACHMENTS} files to one message.`);
   }
   return left;
 }
@@ -67,6 +70,43 @@ async function preparePhoto(uri: string, id: string, name: string): Promise<Atta
   };
 }
 
+/** Saves a PDF and draws its first pages (as many as one question may carry) as JPEGs. */
+async function preparePdf(uri: string, id: string, name: string, size: number) {
+  const saved = await keepFile(uri, `${id}.pdf`);
+  const maxPages = useAuthStore.getState().features?.document_pages_max ?? DEFAULT_PAGES_MAX;
+  let rendered;
+  try {
+    rendered = await renderPdfPages(await readBase64(saved.path), {
+      maxPages,
+      maxEdge: PAGE_EDGE,
+      quality: PAGE_QUALITY,
+    });
+  } catch {
+    deleteAttachmentFiles({ path: saved.path });
+    throw new Error(PDF_CANT_OPEN);
+  }
+  if (rendered.pages.length === 0) {
+    deleteAttachmentFiles({ path: saved.path });
+    throw new Error(PDF_CANT_OPEN);
+  }
+  const pages: PageImage[] = [];
+  for (const [index, page] of rendered.pages.entries()) {
+    const file = await writeBase64File(`${id}-page${index + 1}.jpg`, page.base64, 'attachments');
+    pages.push({ path: file.path, width: page.width, height: page.height, size: file.size });
+  }
+  const attachment: Attachment = {
+    id,
+    kind: 'pdf',
+    name,
+    path: saved.path,
+    mimeType: 'application/pdf',
+    size: saved.size || size,
+    pages,
+    pageCount: rendered.totalPages,
+  };
+  return attachment;
+}
+
 /** Puts placeholders in the composer right away, then prepares each file one by one. */
 async function addInBackground(
   items: { draft: DraftAttachment; prepare: () => Promise<Attachment> }[],
@@ -85,13 +125,15 @@ async function addInBackground(
         useComposerStore.getState().updateAttachment(draft.id, { status: 'ready', attachment });
       } else {
         // Removed while it was being prepared: drop the saved copy.
-        deleteFile(attachment.path);
+        deleteAttachmentFiles(attachment);
       }
     } catch (error) {
       console.warn('Could not prepare a file.', error);
-      useComposerStore
-        .getState()
-        .updateAttachment(draft.id, { status: 'failed', error: 'This file could not be added.' });
+      const message =
+        error instanceof Error && error.message === PDF_CANT_OPEN
+          ? PDF_CANT_OPEN
+          : 'This file could not be added.';
+      useComposerStore.getState().updateAttachment(draft.id, { status: 'failed', error: message });
     }
   }
 }
@@ -134,7 +176,7 @@ export async function addPhotoFromCamera() {
   if (slotsLeft() <= 0) return 0;
   const permission = await ImagePicker.requestCameraPermissionsAsync();
   if (!permission.granted) {
-    Alert.alert('Camera is off', 'Allow camera access in Settings to take a photo.');
+    showProblem('Camera is off', 'Allow camera access in Settings to take a photo.');
     return 0;
   }
   const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
@@ -147,16 +189,16 @@ function documentKind(asset: DocumentPicker.DocumentPickerAsset): AttachmentKind
   const type = asset.mimeType?.toLowerCase() ?? '';
   const extension = extensionOf(asset.name);
   if (type === 'application/pdf' || extension === 'pdf') return 'pdf';
-  if (TEXT_TYPES.includes(type) || TEXT_EXTENSIONS.includes(extension)) return 'text';
+  if (PICTURE_TYPES.includes(type) || PICTURE_EXTENSIONS.includes(extension)) return 'image';
   return undefined;
 }
 
-/** Opens the file picker (PDF and text files). Returns how many files were added. */
+/** Opens the file picker (PDFs and pictures). Returns how many files were added. */
 export async function addDocuments() {
   const left = slotsLeft();
   if (left <= 0) return 0;
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['application/pdf', ...TEXT_TYPES],
+    type: ['application/pdf', ...PICTURE_TYPES],
     multiple: left > 1,
     copyToCacheDirectory: true,
   });
@@ -168,30 +210,29 @@ export async function addDocuments() {
     const kind = documentKind(asset);
     const size = asset.size ?? 0;
     if (!kind) {
-      problems.push(`${asset.name}: only PDF and text files are supported.`);
+      problems.push(`${asset.name}: only PDFs and pictures can be added.`);
       continue;
     }
     if (kind === 'pdf' && size > MAX_PDF_BYTES) {
       problems.push(`${asset.name}: PDFs can be up to 15 MB.`);
       continue;
     }
-    if (kind === 'text' && size > MAX_TEXT_BYTES) {
-      problems.push(`${asset.name}: text files can be up to 512 KB.`);
-      continue;
-    }
     const id = newId();
-    const extension = extensionOf(asset.name) || (kind === 'pdf' ? 'pdf' : 'txt');
-    const mimeType = kind === 'pdf' ? 'application/pdf' : (asset.mimeType ?? 'text/plain');
-    items.push({
-      draft: { id, kind, name: asset.name, status: 'preparing' as const },
-      prepare: async (): Promise<Attachment> => {
-        const saved = await keepFile(asset.uri, `${id}.${extension}`);
-        return { id, kind, name: asset.name, path: saved.path, mimeType, size: saved.size || size };
-      },
-    });
+    const { name, uri } = asset;
+    items.push(
+      kind === 'image'
+        ? {
+            draft: { id, kind, name, status: 'preparing' as const, previewUri: uri },
+            prepare: () => preparePhoto(uri, id, name),
+          }
+        : {
+            draft: { id, kind, name, status: 'preparing' as const },
+            prepare: () => preparePdf(uri, id, name, size),
+          },
+    );
   }
 
-  if (problems.length > 0) Alert.alert('Some files were not added', problems.join('\n'));
+  if (problems.length > 0) showProblem('Some files were not added', problems.join('\n'));
   if (items.length === 0) return 0;
   void addInBackground(items);
   return items.length;

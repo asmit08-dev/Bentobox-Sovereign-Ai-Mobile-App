@@ -11,3 +11,10 @@ export function fileTypeLabel(name: string) {
   const dot = name.lastIndexOf('.');
   return dot === -1 ? 'FILE' : name.slice(dot + 1).toUpperCase();
 }
+
+/** A PDF's line under its name: "PDF · 3 pages", or "PDF · 80 pages · first 50 sent". */
+export function pdfDetails(pageCount: number | undefined, sentPages: number) {
+  if (!pageCount) return 'PDF';
+  const pages = `PDF · ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}`;
+  return sentPages > 0 && sentPages < pageCount ? `${pages} · first ${sentPages} sent` : pages;
+}

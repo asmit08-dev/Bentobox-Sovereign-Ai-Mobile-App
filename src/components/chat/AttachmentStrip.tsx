@@ -9,7 +9,7 @@ import Animated from 'react-native-reanimated';
 import { AppText } from '@/components/ui/AppText';
 import { withAlpha } from '@/lib/color';
 import { fileUri } from '@/lib/files';
-import { fileTypeLabel, formatBytes } from '@/lib/format';
+import { fileTypeLabel, formatBytes, pdfDetails } from '@/lib/format';
 import { popIn, popOut, smoothLayout } from '@/theme/motion';
 import { makeStyles, useTheme } from '@/theme/theme';
 import { radius, spacing } from '@/theme/tokens';
@@ -44,7 +44,10 @@ export function AttachmentStrip({ items, onRemove }: AttachmentStripProps) {
         >
           {item.kind === 'image' ? <PhotoThumb item={item} /> : <DocumentChip item={item} />}
           {item.status === 'failed' ? (
-            <View style={styles.failed} accessibilityLabel="This file could not be added">
+            <View
+              style={styles.failed}
+              accessibilityLabel={item.error ?? 'This file could not be added.'}
+            >
               <WarningCircleIcon size={16} color={colors.danger} weight="fill" />
             </View>
           ) : null}
@@ -84,6 +87,15 @@ function DocumentChip({ item }: { item: DraftAttachment }) {
   const styles = useStyles();
   const Icon = item.kind === 'pdf' ? FilePdfIcon : FileTextIcon;
   const size = item.attachment ? formatBytes(item.attachment.size) : '';
+  const attachment = item.attachment;
+  const details =
+    item.status === 'failed'
+      ? (item.error ?? 'This file could not be added.')
+      : attachment?.kind === 'pdf'
+        ? pdfDetails(attachment.pageCount, attachment.pages?.length ?? 0)
+        : item.status === 'preparing' && item.kind === 'pdf'
+          ? 'Reading pages…'
+          : [fileTypeLabel(item.name), size].filter(Boolean).join(' · ');
   return (
     <View style={styles.chip} accessibilityLabel={`File ${item.name}`}>
       <View style={styles.chipIcon}>
@@ -97,8 +109,12 @@ function DocumentChip({ item }: { item: DraftAttachment }) {
         <AppText variant="titleSm" numberOfLines={1} ellipsizeMode="middle">
           {item.name}
         </AppText>
-        <AppText variant="caption" color={colors.textTertiary} numberOfLines={1}>
-          {[fileTypeLabel(item.name), size].filter(Boolean).join(' · ')}
+        <AppText
+          variant="caption"
+          color={item.status === 'failed' ? colors.danger : colors.textTertiary}
+          numberOfLines={1}
+        >
+          {details}
         </AppText>
       </View>
     </View>
